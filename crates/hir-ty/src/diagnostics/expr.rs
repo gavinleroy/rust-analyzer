@@ -64,7 +64,11 @@ struct ExprValidator {
 
 impl ExprValidator {
     fn new(owner: DefWithBodyId, infer: Arc<InferenceResult>) -> ExprValidator {
-        ExprValidator { owner, infer, diagnostics: Vec::new() }
+        ExprValidator {
+            owner,
+            infer,
+            diagnostics: Vec::new(),
+        }
     }
 
     fn validate_body(&mut self, db: &dyn HirDatabase) {
@@ -75,11 +79,12 @@ impl ExprValidator {
             if let Some((variant, missed_fields, true)) =
                 record_literal_missing_fields(db, &self.infer, id, expr)
             {
-                self.diagnostics.push(BodyValidationDiagnostic::RecordMissingFields {
-                    record: Either::Left(id),
-                    variant,
-                    missed_fields,
-                });
+                self.diagnostics
+                    .push(BodyValidationDiagnostic::RecordMissingFields {
+                        record: Either::Left(id),
+                        variant,
+                        missed_fields,
+                    });
             }
 
             match expr {
@@ -96,11 +101,12 @@ impl ExprValidator {
             if let Some((variant, missed_fields, true)) =
                 record_pattern_missing_fields(db, &self.infer, id, pat)
             {
-                self.diagnostics.push(BodyValidationDiagnostic::RecordMissingFields {
-                    record: Either::Right(id),
-                    variant,
-                    missed_fields,
-                });
+                self.diagnostics
+                    .push(BodyValidationDiagnostic::RecordMissingFields {
+                        record: Either::Right(id),
+                        variant,
+                        missed_fields,
+                    });
             }
         }
     }
@@ -160,7 +166,12 @@ impl ExprValidator {
         }
 
         let pattern_arena = Arena::new();
-        let cx = MatchCheckCtx::new(self.owner.module(db.upcast()), self.owner, db, &pattern_arena);
+        let cx = MatchCheckCtx::new(
+            self.owner.module(db.upcast()),
+            self.owner,
+            db,
+            &pattern_arena,
+        );
 
         let mut m_arms = Vec::with_capacity(arms.len());
         let mut has_lowering_errors = false;
@@ -212,10 +223,11 @@ impl ExprValidator {
 
         let witnesses = report.non_exhaustiveness_witnesses;
         if !witnesses.is_empty() {
-            self.diagnostics.push(BodyValidationDiagnostic::MissingMatchArms {
-                match_expr,
-                uncovered_patterns: missing_match_arms(&cx, scrut_ty, witnesses, arms),
-            });
+            self.diagnostics
+                .push(BodyValidationDiagnostic::MissingMatchArms {
+                    match_expr,
+                    uncovered_patterns: missing_match_arms(&cx, scrut_ty, witnesses, arms),
+                });
         }
     }
 
@@ -229,7 +241,9 @@ impl ExprValidator {
     ) -> &'p DeconstructedPat<'p> {
         let mut patcx = match_check::PatCtxt::new(db, &self.infer, body);
         let pattern = patcx.lower_pattern(pat);
-        let pattern = cx.pattern_arena.alloc(DeconstructedPat::from_pat(cx, &pattern));
+        let pattern = cx
+            .pattern_arena
+            .alloc(DeconstructedPat::from_pat(cx, &pattern));
         if !patcx.errors.is_empty() {
             *have_errors = true;
         }
@@ -265,7 +279,11 @@ impl FilterMapNextChecker {
             ),
             None => (None, None),
         };
-        Self { filter_map_function_id, next_function_id, prev_filter_map_expr_id: None }
+        Self {
+            filter_map_function_id,
+            next_function_id,
+            prev_filter_map_expr_id: None,
+        }
     }
 
     // check for instances of .filter_map(..).next()
@@ -300,8 +318,18 @@ pub fn record_literal_missing_fields(
     expr: &Expr,
 ) -> Option<(VariantId, Vec<LocalFieldId>, /*exhaustive*/ bool)> {
     let (fields, exhaustive) = match expr {
-        Expr::RecordLit { fields, spread, ellipsis, is_assignee_expr, .. } => {
-            let exhaustive = if *is_assignee_expr { !*ellipsis } else { spread.is_none() };
+        Expr::RecordLit {
+            fields,
+            spread,
+            ellipsis,
+            is_assignee_expr,
+            ..
+        } => {
+            let exhaustive = if *is_assignee_expr {
+                !*ellipsis
+            } else {
+                spread.is_none()
+            };
             (fields, exhaustive)
         }
         _ => return None,
@@ -318,7 +346,13 @@ pub fn record_literal_missing_fields(
     let missed_fields: Vec<LocalFieldId> = variant_data
         .fields()
         .iter()
-        .filter_map(|(f, d)| if specified_fields.contains(&d.name) { None } else { Some(f) })
+        .filter_map(|(f, d)| {
+            if specified_fields.contains(&d.name) {
+                None
+            } else {
+                Some(f)
+            }
+        })
         .collect();
     if missed_fields.is_empty() {
         return None;
@@ -333,7 +367,11 @@ pub fn record_pattern_missing_fields(
     pat: &Pat,
 ) -> Option<(VariantId, Vec<LocalFieldId>, /*exhaustive*/ bool)> {
     let (fields, exhaustive) = match pat {
-        Pat::Record { path: _, args, ellipsis } => (args, !ellipsis),
+        Pat::Record {
+            path: _,
+            args,
+            ellipsis,
+        } => (args, !ellipsis),
         _ => return None,
     };
 
@@ -348,7 +386,13 @@ pub fn record_pattern_missing_fields(
     let missed_fields: Vec<LocalFieldId> = variant_data
         .fields()
         .iter()
-        .filter_map(|(f, d)| if specified_fields.contains(&d.name) { None } else { Some(f) })
+        .filter_map(|(f, d)| {
+            if specified_fields.contains(&d.name) {
+                None
+            } else {
+                Some(f)
+            }
+        })
         .collect();
     if missed_fields.is_empty() {
         return None;
@@ -399,12 +443,20 @@ fn missing_match_arms<'p>(
             [witness] => format!("`{}` not covered", pat_display(witness)),
             [head @ .., tail] if head.len() < LIMIT => {
                 let head = head.iter().map(pat_display);
-                format!("`{}` and `{}` not covered", head.format("`, `"), pat_display(tail))
+                format!(
+                    "`{}` and `{}` not covered",
+                    head.format("`, `"),
+                    pat_display(tail)
+                )
             }
             _ => {
                 let (head, tail) = witnesses.split_at(LIMIT);
                 let head = head.iter().map(pat_display);
-                format!("`{}` and {} more not covered", head.format("`, `"), tail.len())
+                format!(
+                    "`{}` and {} more not covered",
+                    head.format("`, `"),
+                    tail.len()
+                )
             }
         }
     }

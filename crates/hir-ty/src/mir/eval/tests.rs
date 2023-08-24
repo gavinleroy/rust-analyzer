@@ -59,7 +59,12 @@ fn check_pass_and_stdio(ra_fixture: &str, expected_stdout: &str, expected_stderr
                 (usize::MAX, size)
             };
             let span_formatter = |file, range: TextRange| {
-                format!("{:?} {:?}..{:?}", file, line_index(range.start()), line_index(range.end()))
+                format!(
+                    "{:?} {:?}..{:?}",
+                    file,
+                    line_index(range.start()),
+                    line_index(range.end())
+                )
             };
             e.pretty_print(&mut err, &db, span_formatter).unwrap();
             panic!("Error in interpreting: {err}");

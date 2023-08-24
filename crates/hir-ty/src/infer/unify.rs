@@ -10,8 +10,12 @@ use chalk_solve::infer::ParameterEnaVariableExt;
 use either::Either;
 use ena::unify::UnifyKey;
 use hir_expand::name;
+use index_vec::IndexVec;
+use rustc_hash::FxHashMap;
 use stdx::never;
 use triomphe::Arc;
+
+use tracing::debug;
 
 use super::{InferOk, InferResult, InferenceContext, TypeError};
 use crate::{
@@ -118,16 +122,24 @@ pub(crate) fn unify(
         } == Some(iv))
     };
     let fallback = |iv, kind, default, binder| match kind {
-        chalk_ir::VariableKind::Ty(_ty_kind) => find_var(iv)
-            .map_or(default, |i| BoundVar::new(binder, i).to_ty(Interner).cast(Interner)),
-        chalk_ir::VariableKind::Lifetime => find_var(iv)
-            .map_or(default, |i| BoundVar::new(binder, i).to_lifetime(Interner).cast(Interner)),
-        chalk_ir::VariableKind::Const(ty) => find_var(iv)
-            .map_or(default, |i| BoundVar::new(binder, i).to_const(Interner, ty).cast(Interner)),
+        chalk_ir::VariableKind::Ty(_ty_kind) => find_var(iv).map_or(default, |i| {
+            BoundVar::new(binder, i).to_ty(Interner).cast(Interner)
+        }),
+        chalk_ir::VariableKind::Lifetime => find_var(iv).map_or(default, |i| {
+            BoundVar::new(binder, i)
+                .to_lifetime(Interner)
+                .cast(Interner)
+        }),
+        chalk_ir::VariableKind::Const(ty) => find_var(iv).map_or(default, |i| {
+            BoundVar::new(binder, i)
+                .to_const(Interner, ty)
+                .cast(Interner)
+        }),
     };
     Some(Substitution::from_iter(
         Interner,
-        vars.iter(Interner).map(|v| table.resolve_with_fallback(v.clone(), &fallback)),
+        vars.iter(Interner)
+            .map(|v| table.resolve_with_fallback(v.clone(), &fallback)),
     ))
 }
 
@@ -142,18 +154,51 @@ bitflags::bitflags! {
 
 type ChalkInferenceTable = chalk_solve::infer::InferenceTable<Interner>;
 
+index_vec::define_index_type! {
+    pub(crate) struct ObligationKey = usize;
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ObligationTracker<'a> {
+    /// The obligation attempts during the process of type-checking. For a given
+    /// tracked obligation, there may be several attempts at making it succeed.
+    /// These are *required* to succeed for type-checking to succeed.
+    pub(super) tracked: IndexVec<ObligationKey, Vec<super::QueryAttempt<'a>>>,
+
+    pub(super) info: FxHashMap<ObligationKey, (base_db::CrateId, Option<hir_def::BlockId>)>,
+
+    /// During type-inference sometimes RA wants to know if something holds,
+    /// but that isn't necessarily required for type-checking to succeed. The
+    /// responses here *can* dictate what is tried in the future.
+    pub(super) other: Vec<super::TracedTraitQuery<'a>>,
+}
+
+impl InferenceTable<'_> {
+    fn fresh_key(&mut self) -> ObligationKey {
+        let key = self.tracked_obligations.tracked.push(vec![]);
+        let krate = self.trait_env.krate;
+        let block = self.trait_env.block;
+        self.tracked_obligations.info.insert(key, (krate, block));
+
+        key
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct InferenceTable<'a> {
     pub(crate) db: &'a dyn HirDatabase,
     pub(crate) trait_env: Arc<TraitEnvironment>,
     var_unification_table: ChalkInferenceTable,
     type_variable_table: Vec<TypeVariableFlags>,
-    pending_obligations: Vec<Canonicalized<InEnvironment<Goal>>>,
+    pending_obligations: Vec<(ObligationKey, Canonicalized<InEnvironment<Goal>>)>,
+
+    /// XXX(gavinleroy): Used for the Argus `ProofTree`.
+    pub(crate) tracked_obligations: ObligationTracker<'a>,
 }
 
 pub(crate) struct InferenceTableSnapshot {
     var_table_snapshot: chalk_solve::infer::InferenceSnapshot<Interner>,
-    pending_obligations: Vec<Canonicalized<InEnvironment<Goal>>>,
+    pending_obligations: Vec<(ObligationKey, Canonicalized<InEnvironment<Goal>>)>,
     type_variable_table_snapshot: Vec<TypeVariableFlags>,
 }
 
@@ -165,6 +210,7 @@ impl<'a> InferenceTable<'a> {
             var_unification_table: ChalkInferenceTable::new(),
             type_variable_table: Vec::new(),
             pending_obligations: Vec::new(),
+            tracked_obligations: ObligationTracker::default(),
         }
     }
 
@@ -223,7 +269,10 @@ impl<'a> InferenceTable<'a> {
             .into_iter()
             .map(|free_var| free_var.to_generic_arg(Interner))
             .collect();
-        Canonicalized { value: result.quantified, free_vars }
+        Canonicalized {
+            value: result.quantified,
+            free_vars,
+        }
     }
 
     /// Recurses through the given type, normalizing associated types mentioned
@@ -232,6 +281,7 @@ impl<'a> InferenceTable<'a> {
     /// type annotation (e.g. from a let type annotation, field type or function
     /// call). `make_ty` handles this already, but e.g. for field types we need
     /// to do it as well.
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(crate) fn normalize_associated_types_in<T>(&mut self, ty: T) -> T
     where
         T: HasInterner<Interner = Interner> + TypeFoldable<Interner>,
@@ -271,9 +321,13 @@ impl<'a> InferenceTable<'a> {
         )
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(crate) fn normalize_projection_ty(&mut self, proj_ty: ProjectionTy) -> Ty {
         let var = self.new_type_var();
-        let alias_eq = AliasEq { alias: AliasTy::Projection(proj_ty), ty: var.clone() };
+        let alias_eq = AliasEq {
+            alias: AliasTy::Projection(proj_ty),
+            ty: var.clone(),
+        };
         let obligation = alias_eq.cast(Interner);
         self.register_obligation(obligation);
         var
@@ -281,7 +335,8 @@ impl<'a> InferenceTable<'a> {
 
     fn extend_type_variable_table(&mut self, to_index: usize) {
         let count = to_index - self.type_variable_table.len() + 1;
-        self.type_variable_table.extend(iter::repeat(TypeVariableFlags::default()).take(count));
+        self.type_variable_table
+            .extend(iter::repeat(TypeVariableFlags::default()).take(count));
     }
 
     fn new_var(&mut self, kind: TyVariableKind, diverging: bool) -> Ty {
@@ -289,7 +344,10 @@ impl<'a> InferenceTable<'a> {
         // Chalk might have created some type variables for its own purposes that we don't know about...
         self.extend_type_variable_table(var.index() as usize);
         assert_eq!(var.index() as usize, self.type_variable_table.len() - 1);
-        let flags = self.type_variable_table.get_mut(var.index() as usize).unwrap();
+        let flags = self
+            .type_variable_table
+            .get_mut(var.index() as usize)
+            .unwrap();
         if diverging {
             *flags |= TypeVariableFlags::DIVERGING;
         }
@@ -367,7 +425,11 @@ impl<'a> InferenceTable<'a> {
         T: HasInterner<Interner = Interner> + TypeFoldable<Interner>,
     {
         t.fold_with(
-            &mut resolve::Resolver { table: self, var_stack, fallback },
+            &mut resolve::Resolver {
+                table: self,
+                var_stack,
+                fallback,
+            },
             DebruijnIndex::INNERMOST,
         )
     }
@@ -425,6 +487,7 @@ impl<'a> InferenceTable<'a> {
     }
 
     /// Unify two relatable values (e.g. `Ty`) and register new trait goals that arise from that.
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(crate) fn unify<T: ?Sized + Zip<Interner>>(&mut self, ty1: &T, ty2: &T) -> bool {
         let result = match self.try_unify(ty1, ty2) {
             Ok(r) => r,
@@ -436,6 +499,7 @@ impl<'a> InferenceTable<'a> {
 
     /// Unify two relatable values (e.g. `Ty`) and return new trait goals arising from it, so the
     /// caller needs to deal with them.
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(crate) fn try_unify<T: ?Sized + Zip<Interner>>(
         &mut self,
         t1: &T,
@@ -449,7 +513,10 @@ impl<'a> InferenceTable<'a> {
             t1,
             t2,
         ) {
-            Ok(result) => Ok(InferOk { goals: result.goals, value: () }),
+            Ok(result) => Ok(InferOk {
+                goals: result.goals,
+                value: (),
+            }),
             Err(chalk_ir::NoSolution) => Err(TypeError),
         }
     }
@@ -458,7 +525,9 @@ impl<'a> InferenceTable<'a> {
     /// otherwise, return ty.
     pub(crate) fn resolve_ty_shallow(&mut self, ty: &Ty) -> Ty {
         self.resolve_obligations_as_possible();
-        self.var_unification_table.normalize_ty_shallow(Interner, ty).unwrap_or_else(|| ty.clone())
+        self.var_unification_table
+            .normalize_ty_shallow(Interner, ty)
+            .unwrap_or_else(|| ty.clone())
     }
 
     pub(crate) fn snapshot(&mut self) -> InferenceTableSnapshot {
@@ -473,7 +542,8 @@ impl<'a> InferenceTable<'a> {
     }
 
     pub(crate) fn rollback_to(&mut self, snapshot: InferenceTableSnapshot) {
-        self.var_unification_table.rollback_to(snapshot.var_table_snapshot);
+        self.var_unification_table
+            .rollback_to(snapshot.var_table_snapshot);
         self.type_variable_table = snapshot.type_variable_table_snapshot;
         self.pending_obligations = snapshot.pending_obligations;
     }
@@ -488,28 +558,53 @@ impl<'a> InferenceTable<'a> {
     /// Checks an obligation without registering it. Useful mostly to check
     /// whether a trait *might* be implemented before deciding to 'lock in' the
     /// choice (during e.g. method resolution or deref).
-    pub(crate) fn try_obligation(&mut self, goal: Goal) -> Option<Solution> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    pub(crate) fn try_obligation(
+        &mut self,
+        goal: Goal,
+        key: Option<ObligationKey>,
+    ) -> Option<Solution> {
         let in_env = InEnvironment::new(&self.trait_env.env, goal);
         let canonicalized = self.canonicalize(in_env);
-        let solution =
-            self.db.trait_solve(self.trait_env.krate, self.trait_env.block, canonicalized.value);
+        // NOTE(gavinleroy), db.trait_solve -> trait_solve
+        let solution = self.trait_solve(
+            self.trait_env.krate,
+            self.trait_env.block,
+            canonicalized.value,
+            key,
+        );
         solution
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(crate) fn register_obligation(&mut self, goal: Goal) {
+        debug!(?goal, "registering_obligation as raw Goal");
+
         let in_env = InEnvironment::new(&self.trait_env.env, goal);
-        self.register_obligation_in_env(in_env)
+        self.register_obligation_in_env(in_env, None)
     }
 
-    fn register_obligation_in_env(&mut self, goal: InEnvironment<Goal>) {
+    #[tracing::instrument(level = "debug", skip(self))]
+    fn register_obligation_in_env(
+        &mut self,
+        goal: InEnvironment<Goal>,
+        key: Option<ObligationKey>,
+    ) {
         let canonicalized = self.canonicalize(goal);
-        if !self.try_resolve_obligation(&canonicalized) {
-            self.pending_obligations.push(canonicalized);
+        let key = key.unwrap_or_else(|| self.fresh_key());
+        let mut resolved = true;
+        if !self.try_resolve_obligation(&canonicalized, key) {
+            resolved = false;
+            self.pending_obligations.push((key, canonicalized.clone()));
         }
+        tracing::debug!("RESOLVING {} {:?}", resolved, canonicalized);
     }
 
     pub(crate) fn register_infer_ok<T>(&mut self, infer_ok: InferOk<T>) {
-        infer_ok.goals.into_iter().for_each(|goal| self.register_obligation_in_env(goal));
+        infer_ok
+            .goals
+            .into_iter()
+            .for_each(|goal| self.register_obligation_in_env(goal, None));
     }
 
     pub(crate) fn resolve_obligations_as_possible(&mut self) {
@@ -519,9 +614,9 @@ impl<'a> InferenceTable<'a> {
         while changed {
             changed = false;
             mem::swap(&mut self.pending_obligations, &mut obligations);
-            for canonicalized in obligations.drain(..) {
+            for (key, canonicalized) in obligations.drain(..) {
                 if !self.check_changed(&canonicalized) {
-                    self.pending_obligations.push(canonicalized);
+                    self.pending_obligations.push((key, canonicalized));
                     continue;
                 }
                 changed = true;
@@ -530,7 +625,7 @@ impl<'a> InferenceTable<'a> {
                     canonicalized.value.value,
                     Interner,
                 );
-                self.register_obligation_in_env(uncanonical);
+                self.register_obligation_in_env(uncanonical, Some(key));
             }
         }
     }
@@ -596,11 +691,19 @@ impl<'a> InferenceTable<'a> {
         }
 
         let snapshot = self.snapshot();
-        let highest_known_var = self.new_type_var().inference_var(Interner).expect("inference_var");
+        let highest_known_var = self
+            .new_type_var()
+            .inference_var(Interner)
+            .expect("inference_var");
         let result = f(self);
         self.rollback_to(snapshot);
-        result
-            .fold_with(&mut VarFudger { table: self, highest_known_var }, DebruijnIndex::INNERMOST)
+        result.fold_with(
+            &mut VarFudger {
+                table: self,
+                highest_known_var,
+            },
+            DebruijnIndex::INNERMOST,
+        )
     }
 
     /// This checks whether any of the free variables in the `canonicalized`
@@ -623,18 +726,24 @@ impl<'a> InferenceTable<'a> {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn try_resolve_obligation(
         &mut self,
         canonicalized: &Canonicalized<InEnvironment<Goal>>,
+        key: ObligationKey,
     ) -> bool {
-        let solution = self.db.trait_solve(
+        // NOTE(gavinleroy) db.trait_solve -> trait_solve
+        let solution = self.trait_solve(
             self.trait_env.krate,
             self.trait_env.block,
             canonicalized.value.clone(),
+            Some(key),
         );
 
         match solution {
             Some(Solution::Unique(canonical_subst)) => {
+                tracing::debug!(?canonical_subst, "Unique solution");
+
                 canonicalized.apply_solution(
                     self,
                     Canonical {
@@ -646,6 +755,8 @@ impl<'a> InferenceTable<'a> {
                 true
             }
             Some(Solution::Ambig(Guidance::Definite(substs))) => {
+                tracing::debug!(?substs, "Definite guidance");
+
                 canonicalized.apply_solution(self, substs);
                 false
             }
@@ -674,6 +785,7 @@ impl<'a> InferenceTable<'a> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn callable_sig_from_fn_trait(
         &mut self,
         ty: &Ty,
@@ -718,9 +830,17 @@ impl<'a> InferenceTable<'a> {
             environment: trait_env.clone(),
         };
         let canonical = self.canonicalize(obligation.clone());
+
+        debug!(?trait_ref, ?canonical, "callable_sig_from_fn_trait (outer)");
+
+        // NOTE(gavinleroy) db.trait_solve -> trait_solve
         if self
-            .db
-            .trait_solve(krate, self.trait_env.block, canonical.value.cast(Interner))
+            .trait_solve(
+                krate,
+                self.trait_env.block,
+                canonical.value.cast(Interner),
+                None,
+            )
             .is_some()
         {
             self.register_obligation(obligation.goal);
@@ -733,11 +853,26 @@ impl<'a> InferenceTable<'a> {
                     environment: trait_env.clone(),
                 };
                 let canonical = self.canonicalize(obligation.clone());
+
+                debug!(?trait_ref, ?canonical, "callable_sig_from_fn_trait (inner)");
+
+                // NOTE(gavinleroy) db.trait_solve -> trait_solve
                 if self
-                    .db
-                    .trait_solve(krate, self.trait_env.block, canonical.value.cast(Interner))
+                    .trait_solve(
+                        krate,
+                        self.trait_env.block,
+                        canonical.value.cast(Interner),
+                        None,
+                    )
                     .is_some()
                 {
+                    debug!(
+                        ?fn_x,
+                        ?arg_tys,
+                        ?return_ty,
+                        "callable_sig_from_fn_trait (solution)"
+                    );
+
                     return Some((fn_x, arg_tys, return_ty));
                 }
             }
@@ -747,6 +882,7 @@ impl<'a> InferenceTable<'a> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(super) fn insert_type_vars<T>(&mut self, ty: T) -> T
     where
         T: HasInterner<Interner = Interner> + TypeFoldable<Interner>,
@@ -796,11 +932,55 @@ impl<'a> InferenceTable<'a> {
             _ => c,
         }
     }
+
+    /// XXX(gavinleroy): used in Argus tracing.
+    fn trait_solve(
+        &mut self,
+        krate: base_db::CrateId,
+        block: Option<hir_def::BlockId>,
+        canonicalized: crate::Canonical<crate::InEnvironment<crate::Goal>>,
+        key: Option<ObligationKey>,
+    ) -> Option<crate::Solution> {
+        let context = self.clone();
+
+        let (solution, trace) = self
+            .db
+            .trait_solve_query(krate, block, canonicalized.clone());
+
+        let traced = super::QueryAttempt {
+            context,
+            canonicalized,
+            solution: solution.clone(),
+            trace,
+        };
+
+        if let Some(key) = key {
+            // If a key is given then this is part of an attempt to resolve a necessary goal.
+            self.tracked_obligations.tracked[key].push(traced);
+        } else {
+            // If an obligation key is not provided, then RA is trying to gain more
+            // information about a type, though it is not necessarily a requirement
+            // for the program to type-chekc.
+            let krate = self.trait_env.krate;
+            let block = self.trait_env.block;
+            self.tracked_obligations
+                .other
+                .push(super::TracedTraitQuery {
+                    krate,
+                    block,
+                    kind: super::AttemptKind::Try(traced),
+                });
+        }
+
+        solution
+    }
 }
 
 impl<'a> fmt::Debug for InferenceTable<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InferenceTable").field("num_vars", &self.type_variable_table.len()).finish()
+        f.debug_struct("InferenceTable")
+            .field("num_vars", &self.type_variable_table.len())
+            .finish()
     }
 }
 
@@ -876,7 +1056,9 @@ mod resolve {
             let var = self.table.var_unification_table.inference_var_root(var);
             let default = ConstData {
                 ty: ty.clone(),
-                value: ConstValue::Concrete(ConcreteConst { interned: ConstScalar::Unknown }),
+                value: ConstValue::Concrete(ConcreteConst {
+                    interned: ConstScalar::Unknown,
+                }),
             }
             .intern(Interner)
             .cast(Interner);

@@ -1,14 +1,14 @@
-mod never_type;
 mod coercion;
-mod regression;
-mod simple;
-mod patterns;
-mod traits;
-mod method_resolution;
-mod macros;
+mod diagnostics;
 mod display_source_code;
 mod incremental;
-mod diagnostics;
+mod macros;
+mod method_resolution;
+mod never_type;
+mod patterns;
+mod regression;
+mod simple;
+mod traits;
 
 use std::{collections::HashMap, env};
 
@@ -97,7 +97,10 @@ fn check_impl(ra_fixture: &str, allow_none: bool, only_types: bool, display_sour
             if only_types {
                 types.insert(file_range, expected);
             } else if expected.starts_with("type: ") {
-                types.insert(file_range, expected.trim_start_matches("type: ").to_string());
+                types.insert(
+                    file_range,
+                    expected.trim_start_matches("type: ").to_string(),
+                );
             } else if expected.starts_with("expected") {
                 mismatches.insert(file_range, expected);
             } else if expected.starts_with("adjustments:") {
@@ -167,7 +170,11 @@ fn check_impl(ra_fixture: &str, allow_none: bool, only_types: bool, display_sour
                 } else {
                     ty.display_test(&db).to_string()
                 };
-                assert_eq!(actual, expected, "type annotation differs at {:#?}", range.range);
+                assert_eq!(
+                    actual, expected,
+                    "type annotation differs at {:#?}",
+                    range.range
+                );
             }
         }
 
@@ -183,7 +190,11 @@ fn check_impl(ra_fixture: &str, allow_none: bool, only_types: bool, display_sour
                 } else {
                     ty.display_test(&db).to_string()
                 };
-                assert_eq!(actual, expected, "type annotation differs at {:#?}", range.range);
+                assert_eq!(
+                    actual, expected,
+                    "type annotation differs at {:#?}",
+                    range.range
+                );
             }
             if let Some(expected) = adjustments.remove(&range) {
                 let adjustments = inference_result
@@ -213,14 +224,23 @@ fn check_impl(ra_fixture: &str, allow_none: bool, only_types: bool, display_sour
             );
             match mismatches.remove(&range) {
                 Some(annotation) => assert_eq!(actual, annotation),
-                None => format_to!(unexpected_type_mismatches, "{:?}: {}\n", range.range, actual),
+                None => format_to!(
+                    unexpected_type_mismatches,
+                    "{:?}: {}\n",
+                    range.range,
+                    actual
+                ),
             }
         }
     }
 
     let mut buf = String::new();
     if !unexpected_type_mismatches.is_empty() {
-        format_to!(buf, "Unexpected type mismatches:\n{}", unexpected_type_mismatches);
+        format_to!(
+            buf,
+            "Unexpected type mismatches:\n{}",
+            unexpected_type_mismatches
+        );
     }
     if !mismatches.is_empty() {
         format_to!(buf, "Unchecked mismatch annotations:\n");
@@ -335,11 +355,21 @@ fn infer_with_mismatches(content: &str, include_mismatches: bool) -> String {
         });
         for (node, ty) in &types {
             let (range, text) = if let Some(self_param) = ast::SelfParam::cast(node.value.clone()) {
-                (self_param.name().unwrap().syntax().text_range(), "self".to_string())
+                (
+                    self_param.name().unwrap().syntax().text_range(),
+                    "self".to_string(),
+                )
             } else {
-                (node.value.text_range(), node.value.text().to_string().replace('\n', " "))
+                (
+                    node.value.text_range(),
+                    node.value.text().to_string().replace('\n', " "),
+                )
             };
-            let macro_prefix = if node.file_id != file_id.into() { "!" } else { "" };
+            let macro_prefix = if node.file_id != file_id.into() {
+                "!"
+            } else {
+                ""
+            };
             format_to!(
                 buf,
                 "{}{:?} '{}': {}\n",
@@ -356,7 +386,11 @@ fn infer_with_mismatches(content: &str, include_mismatches: bool) -> String {
             });
             for (src_ptr, mismatch) in &mismatches {
                 let range = src_ptr.value.text_range();
-                let macro_prefix = if src_ptr.file_id != file_id.into() { "!" } else { "" };
+                let macro_prefix = if src_ptr.file_id != file_id.into() {
+                    "!"
+                } else {
+                    ""
+                };
                 format_to!(
                     buf,
                     "{}{:?}: expected {}, got {}\n",
@@ -460,7 +494,10 @@ fn visit_module(
                     db.enum_data(it)
                         .variants
                         .iter()
-                        .map(|(id, _)| hir_def::EnumVariantId { parent: it, local_id: id })
+                        .map(|(id, _)| hir_def::EnumVariantId {
+                            parent: it,
+                            local_id: id,
+                        })
                         .for_each(|it| {
                             let def = it.into();
                             cb(def);

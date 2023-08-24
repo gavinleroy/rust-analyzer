@@ -5,9 +5,12 @@
 
 use std::fmt;
 
+use serde::Serialize;
+use ts_rs::TS;
+
 use hir_expand::name::{name, AsName, Name};
 /// Different signed int types.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(TS, Serialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuiltinInt {
     Isize,
     I8,
@@ -18,7 +21,7 @@ pub enum BuiltinInt {
 }
 
 /// Different unsigned int types.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(TS, Serialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuiltinUint {
     Usize,
     U8,
@@ -28,13 +31,13 @@ pub enum BuiltinUint {
     U128,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(TS, Serialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuiltinFloat {
     F32,
     F64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinType {
     Char,
     Bool,
@@ -70,7 +73,9 @@ impl BuiltinType {
     ];
 
     pub fn by_name(name: &Name) -> Option<Self> {
-        Self::ALL.iter().find_map(|(n, ty)| if n == name { Some(*ty) } else { None })
+        Self::ALL
+            .iter()
+            .find_map(|(n, ty)| if n == name { Some(*ty) } else { None })
     }
 }
 

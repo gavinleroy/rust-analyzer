@@ -1,32 +1,171 @@
 //! Implementation of the Chalk `Interner` trait, which allows customizing the
 //! representation of the various objects Chalk deals with (types, goals etc.).
 
+use std::{
+    fmt::{Debug, Display},
+    hash::{Hash, Hasher},
+    ops::Deref,
+};
+
 use crate::{chalk_db, tls, ConstScalar, GenericArg};
 use base_db::salsa::InternId;
-use chalk_ir::{Goal, GoalData};
+use chalk_ir::{Goal, GoalData, TSerialize};
 use hir_def::TypeAliasId;
-use intern::{impl_internable, Interned};
+use intern::{impl_internable, Internable, Interned};
 use smallvec::SmallVec;
 use std::fmt;
 use triomphe::Arc;
 
+use serde::{Serialize, Serializer};
+use ts_rs::TS;
+
 #[derive(Debug, Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
+#[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
 pub struct Interner;
 
-#[derive(PartialEq, Eq, Hash)]
-pub struct InternedWrapper<T>(T);
+pub struct InternedTS<T: Internable + ?Sized + Serialize>(pub Interned<T>);
 
-impl<T: fmt::Debug> fmt::Debug for InternedWrapper<T> {
+// --- ---
+
+impl<T: Internable + ?Sized + TSerialize> TS for InternedTS<T> {
+    fn name() -> String {
+        T::name()
+    }
+    fn name_with_type_args(mut args: Vec<String>) -> String {
+        assert_eq!(args.len(), 1);
+        args.remove(0)
+    }
+    fn inline() -> String {
+        T::inline()
+    }
+    fn inline_flattened() -> String {
+        T::inline_flattened()
+    }
+    fn dependencies() -> Vec<ts_rs::Dependency> {
+        T::dependencies()
+    }
+    fn transparent() -> bool {
+        T::transparent()
+    }
+}
+
+impl<T: Internable + ?Sized + TSerialize> Serialize for InternedTS<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<T: Internable + TSerialize> PartialEq for InternedTS<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl<T: Internable + TSerialize> Eq for InternedTS<T> {}
+
+impl PartialEq for InternedTS<str> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl Eq for InternedTS<str> {}
+
+impl<T: Internable + ?Sized + TSerialize> Hash for InternedTS<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
+    }
+}
+
+impl<T: Internable + ?Sized + TSerialize> AsRef<T> for InternedTS<T> {
+    fn as_ref(&self) -> &T {
+        self.0.as_ref()
+    }
+}
+
+impl<T: Internable + ?Sized + TSerialize> Deref for InternedTS<T> {
+    type Target = Interned<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: Internable + ?Sized + TSerialize> From<Interned<T>> for InternedTS<T> {
+    fn from(data: Interned<T>) -> Self {
+        InternedTS(data)
+    }
+}
+
+impl<T: Internable + ?Sized + TSerialize> Clone for InternedTS<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T: Debug + Internable + ?Sized + TSerialize> Debug for InternedTS<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (*self.0).fmt(f)
+    }
+}
+
+impl<T: Display + Internable + ?Sized + TSerialize> Display for InternedTS<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (*self.0).fmt(f)
+    }
+}
+
+// --- ---
+
+#[derive(PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
+pub struct InternedWrapper<T: TSerialize>(T);
+
+impl<T: fmt::Debug + TSerialize> fmt::Debug for InternedWrapper<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.0, f)
     }
 }
 
-impl<T> std::ops::Deref for InternedWrapper<T> {
+impl<T: TSerialize> std::ops::Deref for InternedWrapper<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+#[derive(TS, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct InternIdTS(#[ts(type = "number")] pub InternId);
+
+impl Serialize for InternIdTS {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = format!("{}", self.0.as_usize());
+        serializer.serialize_str(&s)
+    }
+}
+
+impl std::ops::Deref for InternIdTS {
+    type Target = InternId;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for InternIdTS {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl From<InternId> for InternIdTS {
+    fn from(data: InternId) -> Self {
+        InternIdTS(data)
     }
 }
 
@@ -44,24 +183,24 @@ impl_internable!(
 );
 
 impl chalk_ir::interner::Interner for Interner {
-    type InternedType = Interned<InternedWrapper<chalk_ir::TyData<Self>>>;
-    type InternedLifetime = Interned<InternedWrapper<chalk_ir::LifetimeData<Self>>>;
-    type InternedConst = Interned<InternedWrapper<chalk_ir::ConstData<Self>>>;
+    type InternedType = InternedTS<InternedWrapper<chalk_ir::TyData<Self>>>;
+    type InternedLifetime = InternedTS<InternedWrapper<chalk_ir::LifetimeData<Self>>>;
+    type InternedConst = InternedTS<InternedWrapper<chalk_ir::ConstData<Self>>>;
     type InternedConcreteConst = ConstScalar;
     type InternedGenericArg = chalk_ir::GenericArgData<Self>;
     type InternedGoal = Arc<GoalData<Self>>;
     type InternedGoals = Vec<Goal<Self>>;
-    type InternedSubstitution = Interned<InternedWrapper<SmallVec<[GenericArg; 2]>>>;
-    type InternedProgramClauses = Interned<InternedWrapper<Vec<chalk_ir::ProgramClause<Self>>>>;
+    type InternedSubstitution = InternedTS<InternedWrapper<SmallVec<[GenericArg; 2]>>>;
+    type InternedProgramClauses = InternedTS<InternedWrapper<Vec<chalk_ir::ProgramClause<Self>>>>;
     type InternedProgramClause = chalk_ir::ProgramClauseData<Self>;
     type InternedQuantifiedWhereClauses =
-        Interned<InternedWrapper<Vec<chalk_ir::QuantifiedWhereClause<Self>>>>;
-    type InternedVariableKinds = Interned<InternedWrapper<Vec<chalk_ir::VariableKind<Interner>>>>;
+        InternedTS<InternedWrapper<Vec<chalk_ir::QuantifiedWhereClause<Self>>>>;
+    type InternedVariableKinds = InternedTS<InternedWrapper<Vec<chalk_ir::VariableKind<Interner>>>>;
     type InternedCanonicalVarKinds =
-        Interned<InternedWrapper<Vec<chalk_ir::CanonicalVarKind<Self>>>>;
+        InternedTS<InternedWrapper<Vec<chalk_ir::CanonicalVarKind<Self>>>>;
     type InternedConstraints = Vec<chalk_ir::InEnvironment<chalk_ir::Constraint<Self>>>;
-    type InternedVariances = Interned<InternedWrapper<Vec<chalk_ir::Variance>>>;
-    type DefId = InternId;
+    type InternedVariances = InternedTS<InternedWrapper<Vec<chalk_ir::Variance>>>;
+    type DefId = InternIdTS;
     type InternedAdtId = hir_def::AdtId;
     type Identifier = TypeAliasId;
     type FnAbi = ();
@@ -112,7 +251,6 @@ impl chalk_ir::interner::Interner for Interner {
         alias: &chalk_ir::AliasTy<Interner>,
         fmt: &mut fmt::Formatter<'_>,
     ) -> Option<fmt::Result> {
-        use std::fmt::Debug;
         match alias {
             chalk_ir::AliasTy::Projection(projection_ty) => {
                 Interner::debug_projection_ty(projection_ty, fmt)
@@ -237,7 +375,7 @@ impl chalk_ir::interner::Interner for Interner {
 
     fn intern_ty(self, kind: chalk_ir::TyKind<Self>) -> Self::InternedType {
         let flags = kind.compute_flags(self);
-        Interned::new(InternedWrapper(chalk_ir::TyData { kind, flags }))
+        Interned::new(InternedWrapper(chalk_ir::TyData { kind, flags })).into()
     }
 
     fn ty_data(self, ty: &Self::InternedType) -> &chalk_ir::TyData<Self> {
@@ -245,7 +383,7 @@ impl chalk_ir::interner::Interner for Interner {
     }
 
     fn intern_lifetime(self, lifetime: chalk_ir::LifetimeData<Self>) -> Self::InternedLifetime {
-        Interned::new(InternedWrapper(lifetime))
+        Interned::new(InternedWrapper(lifetime)).into()
     }
 
     fn lifetime_data(self, lifetime: &Self::InternedLifetime) -> &chalk_ir::LifetimeData<Self> {
@@ -253,7 +391,7 @@ impl chalk_ir::interner::Interner for Interner {
     }
 
     fn intern_const(self, constant: chalk_ir::ConstData<Self>) -> Self::InternedConst {
-        Interned::new(InternedWrapper(constant))
+        Interned::new(InternedWrapper(constant)).into()
     }
 
     fn const_data(self, constant: &Self::InternedConst) -> &chalk_ir::ConstData<Self> {
@@ -284,7 +422,7 @@ impl chalk_ir::interner::Interner for Interner {
     }
 
     fn intern_goal(self, goal: GoalData<Self>) -> Self::InternedGoal {
-        Arc::new(goal)
+        Arc::new(goal).into()
     }
 
     fn goal_data(self, goal: &Self::InternedGoal) -> &GoalData<Self> {
@@ -306,7 +444,9 @@ impl chalk_ir::interner::Interner for Interner {
         self,
         data: impl IntoIterator<Item = Result<GenericArg, E>>,
     ) -> Result<Self::InternedSubstitution, E> {
-        Ok(Interned::new(InternedWrapper(data.into_iter().collect::<Result<_, _>>()?)))
+        let v: InternedWrapper<SmallVec<[GenericArg; 2]>> =
+            InternedWrapper(data.into_iter().collect::<Result<_, _>>()?);
+        Ok(Interned::new(v).into())
     }
 
     fn substitution_data(self, substitution: &Self::InternedSubstitution) -> &[GenericArg] {
@@ -331,7 +471,9 @@ impl chalk_ir::interner::Interner for Interner {
         self,
         data: impl IntoIterator<Item = Result<chalk_ir::ProgramClause<Self>, E>>,
     ) -> Result<Self::InternedProgramClauses, E> {
-        Ok(Interned::new(InternedWrapper(data.into_iter().collect::<Result<_, _>>()?)))
+        let v: InternedWrapper<Vec<chalk_ir::ProgramClause<Self>>> =
+            InternedWrapper(data.into_iter().collect::<Result<_, _>>()?);
+        Ok(Interned::new(v).into())
     }
 
     fn program_clauses_data(
@@ -345,7 +487,9 @@ impl chalk_ir::interner::Interner for Interner {
         self,
         data: impl IntoIterator<Item = Result<chalk_ir::QuantifiedWhereClause<Self>, E>>,
     ) -> Result<Self::InternedQuantifiedWhereClauses, E> {
-        Ok(Interned::new(InternedWrapper(data.into_iter().collect::<Result<_, _>>()?)))
+        let v: InternedWrapper<Vec<chalk_ir::QuantifiedWhereClause<Self>>> =
+            InternedWrapper(data.into_iter().collect::<Result<_, _>>()?);
+        Ok(Interned::new(v).into())
     }
 
     fn quantified_where_clauses_data(
@@ -359,7 +503,9 @@ impl chalk_ir::interner::Interner for Interner {
         self,
         data: impl IntoIterator<Item = Result<chalk_ir::VariableKind<Self>, E>>,
     ) -> Result<Self::InternedVariableKinds, E> {
-        Ok(Interned::new(InternedWrapper(data.into_iter().collect::<Result<_, _>>()?)))
+        let v: InternedWrapper<Vec<chalk_ir::VariableKind<Interner>>> =
+            InternedWrapper(data.into_iter().collect::<Result<_, _>>()?);
+        Ok(Interned::new(v).into())
     }
 
     fn variable_kinds_data(
@@ -373,7 +519,9 @@ impl chalk_ir::interner::Interner for Interner {
         self,
         data: impl IntoIterator<Item = Result<chalk_ir::CanonicalVarKind<Self>, E>>,
     ) -> Result<Self::InternedCanonicalVarKinds, E> {
-        Ok(Interned::new(InternedWrapper(data.into_iter().collect::<Result<_, _>>()?)))
+        let v: InternedWrapper<Vec<chalk_ir::CanonicalVarKind<Self>>> =
+            InternedWrapper(data.into_iter().collect::<Result<_, _>>()?);
+        Ok(Interned::new(v).into())
     }
 
     fn canonical_var_kinds_data(
@@ -399,7 +547,9 @@ impl chalk_ir::interner::Interner for Interner {
         self,
         data: impl IntoIterator<Item = Result<chalk_ir::Variance, E>>,
     ) -> Result<Self::InternedVariances, E> {
-        Ok(Interned::new(InternedWrapper(data.into_iter().collect::<Result<_, _>>()?)))
+        let v: InternedWrapper<Vec<chalk_ir::Variance>> =
+            InternedWrapper(data.into_iter().collect::<Result<_, _>>()?);
+        Ok(Interned::new(v).into())
     }
 
     fn variances_data(self, variances: &Self::InternedVariances) -> &[chalk_ir::Variance] {

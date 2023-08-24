@@ -7,7 +7,11 @@
 //! Note that `hir_def` is a work in progress, so not all of the above is
 //! actually true.
 
-#![warn(rust_2018_idioms, unused_lifetimes, semicolon_in_expressions_from_macros)]
+#![warn(
+    rust_2018_idioms,
+    unused_lifetimes,
+    semicolon_in_expressions_from_macros
+)]
 
 #[allow(unused)]
 macro_rules! eprintln {
@@ -17,13 +21,13 @@ macro_rules! eprintln {
 pub mod db;
 
 pub mod attr;
-pub mod path;
 pub mod builtin_type;
-pub mod per_ns;
 pub mod item_scope;
+pub mod path;
+pub mod per_ns;
 
-pub mod lower;
 pub mod expander;
+pub mod lower;
 
 pub mod dyn_map;
 
@@ -38,24 +42,24 @@ pub use self::hir::type_ref;
 pub mod body;
 pub mod resolver;
 
-mod trace;
 pub mod nameres;
+mod trace;
 
-pub mod src;
 pub mod child_by_source;
+pub mod src;
 
-pub mod visibility;
 pub mod find_path;
 pub mod import_map;
+pub mod visibility;
 
 pub use rustc_abi as layout;
 use triomphe::Arc;
 
 #[cfg(test)]
-mod test_db;
-#[cfg(test)]
 mod macro_expansion_tests;
 mod pretty;
+#[cfg(test)]
+mod test_db;
 
 use std::hash::{Hash, Hasher};
 
@@ -83,7 +87,10 @@ use nameres::DefMap;
 use stdx::impl_from;
 use syntax::ast;
 
-use ::tt::token_id as tt;
+use serde::{Serialize, Serializer};
+use ts_rs::TS;
+
+use tt::token_id as tt;
 
 use crate::{
     builtin_type::BuiltinType,
@@ -94,14 +101,34 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+macro_rules! serialize_as_number {
+    ($($name:ident,)*) => {
+        $(
+            impl Serialize for $name {
+                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: Serializer,
+                {
+                    let s = format!("{}", self.0.as_usize());
+                    serializer.serialize_str(&s)
+                }
+            }
+        )*
+    }
+}
+
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleId {
+    #[ts(skip)]
+    #[serde(skip)]
     krate: CrateId,
     /// If this `ModuleId` was derived from a `DefMap` for a block expression, this stores the
     /// `BlockId` of that block expression. If `None`, this module is part of the crate-level
     /// `DefMap` of `krate`.
     block: Option<BlockId>,
     /// The module's ID in its originating `DefMap`.
+    #[ts(skip)]
+    #[serde(skip)]
     pub local_id: LocalModuleId,
 }
 
@@ -137,7 +164,10 @@ pub struct ItemLoc<N: ItemTreeNode> {
 
 impl<N: ItemTreeNode> Clone for ItemLoc<N> {
     fn clone(&self) -> Self {
-        Self { container: self.container, id: self.id }
+        Self {
+            container: self.container,
+            id: self.id,
+        }
     }
 }
 
@@ -166,7 +196,10 @@ pub struct AssocItemLoc<N: ItemTreeNode> {
 
 impl<N: ItemTreeNode> Clone for AssocItemLoc<N> {
     fn clone(&self) -> Self {
-        Self { container: self.container, id: self.id }
+        Self {
+            container: self.container,
+            id: self.id,
+        }
     }
 }
 
@@ -207,77 +240,106 @@ macro_rules! impl_intern {
     };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FunctionId(salsa::InternId);
-type FunctionLoc = AssocItemLoc<Function>;
-impl_intern!(FunctionId, FunctionLoc, intern_function, lookup_intern_function);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FunctionId(#[ts(type = "number")] salsa::InternId);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct StructId(salsa::InternId);
+type FunctionLoc = AssocItemLoc<Function>;
+impl_intern!(
+    FunctionId,
+    FunctionLoc,
+    intern_function,
+    lookup_intern_function
+);
+
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StructId(#[ts(type = "number")] salsa::InternId);
+
 type StructLoc = ItemLoc<Struct>;
 impl_intern!(StructId, StructLoc, intern_struct, lookup_intern_struct);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UnionId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UnionId(#[ts(type = "number")] salsa::InternId);
+
 pub type UnionLoc = ItemLoc<Union>;
 impl_intern!(UnionId, UnionLoc, intern_union, lookup_intern_union);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct EnumId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EnumId(#[ts(type = "number")] salsa::InternId);
 pub type EnumLoc = ItemLoc<Enum>;
 impl_intern!(EnumId, EnumLoc, intern_enum, lookup_intern_enum);
 
-// FIXME: rename to `VariantId`, only enums can ave variants
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// FIXME: rename to `VariantId`, only enums can have variants
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnumVariantId {
     pub parent: EnumId,
+    #[ts(skip)]
+    #[serde(skip)]
     pub local_id: LocalEnumVariantId,
 }
 
 pub type LocalEnumVariantId = Idx<data::adt::EnumVariantData>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldId {
     pub parent: VariantId,
+    #[ts(skip)]
+    #[serde(skip)]
     pub local_id: LocalFieldId,
 }
 
 pub type LocalFieldId = Idx<data::adt::FieldData>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ConstId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ConstId(#[ts(type = "number")] salsa::InternId);
 type ConstLoc = AssocItemLoc<Const>;
 impl_intern!(ConstId, ConstLoc, intern_const, lookup_intern_const);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StaticId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StaticId(#[ts(type = "number")] salsa::InternId);
 pub type StaticLoc = AssocItemLoc<Static>;
 impl_intern!(StaticId, StaticLoc, intern_static, lookup_intern_static);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TraitId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[ts(rename = "ConcreteTraitId")]
+pub struct TraitId(#[ts(type = "number")] salsa::InternId);
 pub type TraitLoc = ItemLoc<Trait>;
 impl_intern!(TraitId, TraitLoc, intern_trait, lookup_intern_trait);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TraitAliasId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TraitAliasId(#[ts(type = "number")] salsa::InternId);
 pub type TraitAliasLoc = ItemLoc<TraitAlias>;
-impl_intern!(TraitAliasId, TraitAliasLoc, intern_trait_alias, lookup_intern_trait_alias);
+impl_intern!(
+    TraitAliasId,
+    TraitAliasLoc,
+    intern_trait_alias,
+    lookup_intern_trait_alias
+);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TypeAliasId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeAliasId(#[ts(type = "number")] salsa::InternId);
 type TypeAliasLoc = AssocItemLoc<TypeAlias>;
-impl_intern!(TypeAliasId, TypeAliasLoc, intern_type_alias, lookup_intern_type_alias);
+impl_intern!(
+    TypeAliasId,
+    TypeAliasLoc,
+    intern_type_alias,
+    lookup_intern_type_alias
+);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct ImplId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[ts(rename = "ConcreteImplId")]
+pub struct ImplId(#[ts(type = "number")] salsa::InternId);
 type ImplLoc = ItemLoc<Impl>;
 impl_intern!(ImplId, ImplLoc, intern_impl, lookup_intern_impl);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct ExternBlockId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct ExternBlockId(#[ts(type = "number")] salsa::InternId);
 type ExternBlockLoc = ItemLoc<ExternBlock>;
-impl_intern!(ExternBlockId, ExternBlockLoc, intern_extern_block, lookup_intern_extern_block);
+impl_intern!(
+    ExternBlockId,
+    ExternBlockLoc,
+    intern_extern_block,
+    lookup_intern_extern_block
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MacroExpander {
@@ -288,8 +350,8 @@ pub enum MacroExpander {
     BuiltInEager(EagerExpander),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct Macro2Id(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct Macro2Id(#[ts(type = "number")] salsa::InternId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Macro2Loc {
     pub container: ModuleId,
@@ -299,8 +361,8 @@ pub struct Macro2Loc {
 }
 impl_intern!(Macro2Id, Macro2Loc, intern_macro2, lookup_intern_macro2);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct MacroRulesId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct MacroRulesId(#[ts(type = "number")] salsa::InternId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MacroRulesLoc {
     pub container: ModuleId,
@@ -309,10 +371,15 @@ pub struct MacroRulesLoc {
     pub allow_internal_unsafe: bool,
     pub local_inner: bool,
 }
-impl_intern!(MacroRulesId, MacroRulesLoc, intern_macro_rules, lookup_intern_macro_rules);
+impl_intern!(
+    MacroRulesId,
+    MacroRulesLoc,
+    intern_macro_rules,
+    lookup_intern_macro_rules
+);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct ProcMacroId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct ProcMacroId(#[ts(type = "number")] salsa::InternId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProcMacroLoc {
     // FIXME: this should be a crate? or just a crate-root module
@@ -321,10 +388,15 @@ pub struct ProcMacroLoc {
     pub expander: ProcMacroExpander,
     pub kind: ProcMacroKind,
 }
-impl_intern!(ProcMacroId, ProcMacroLoc, intern_proc_macro, lookup_intern_proc_macro);
+impl_intern!(
+    ProcMacroId,
+    ProcMacroLoc,
+    intern_proc_macro,
+    lookup_intern_proc_macro
+);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct BlockId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct BlockId(#[ts(type = "number")] salsa::InternId);
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct BlockLoc {
     ast_id: AstId<ast::BlockExpr>,
@@ -333,14 +405,16 @@ pub struct BlockLoc {
 }
 impl_intern!(BlockId, BlockLoc, intern_block, lookup_intern_block);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeOrConstParamId {
     pub parent: GenericDefId,
+    #[ts(skip)]
+    #[serde(skip)]
     pub local_id: LocalTypeOrConstParamId,
 }
 
 /// A TypeOrConstParamId with an invariant that it actually belongs to a type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeParamId(TypeOrConstParamId);
 
 impl TypeParamId {
@@ -366,7 +440,7 @@ impl From<TypeParamId> for TypeOrConstParamId {
 }
 
 /// A TypeOrConstParamId with an invariant that it actually belongs to a const
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConstParamId(TypeOrConstParamId);
 
 impl ConstParamId {
@@ -393,14 +467,16 @@ impl From<ConstParamId> for TypeOrConstParamId {
 
 pub type LocalTypeOrConstParamId = Idx<generics::TypeOrConstParamData>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LifetimeParamId {
     pub parent: GenericDefId,
+    #[ts(skip)]
+    #[serde(skip)]
     pub local_id: LocalLifetimeParamId,
 }
 pub type LocalLifetimeParamId = Idx<generics::LifetimeParamData>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemContainerId {
     ExternBlockId(ExternBlockId),
     ModuleId(ModuleId),
@@ -410,7 +486,8 @@ pub enum ItemContainerId {
 impl_from!(ModuleId for ItemContainerId);
 
 /// A Data Type
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(TS, Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename = "ConcreteAdtId")]
 pub enum AdtId {
     StructId(StructId),
     UnionId(UnionId),
@@ -419,7 +496,7 @@ pub enum AdtId {
 impl_from!(StructId, UnionId, EnumId for AdtId);
 
 /// A macro
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(TS, Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MacroId {
     Macro2Id(Macro2Id),
     MacroRulesId(MacroRulesId),
@@ -437,7 +514,7 @@ impl MacroId {
 }
 
 /// A generic param
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GenericParamId {
     TypeParamId(TypeParamId),
     ConstParamId(ConstParamId),
@@ -446,7 +523,7 @@ pub enum GenericParamId {
 impl_from!(TypeParamId, LifetimeParamId, ConstParamId for GenericParamId);
 
 /// The defs which can be visible in the module.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModuleDefId {
     ModuleId(ModuleId),
     FunctionId(FunctionId),
@@ -477,13 +554,13 @@ impl_from!(
 );
 
 // FIXME: make this a DefWithBodyId
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct AnonymousConstId(InternId);
+#[derive(TS, Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct AnonymousConstId(#[ts(type = "number")] InternId);
 impl_intern_key!(AnonymousConstId);
 
 /// A constant, which might appears as a const item, an annonymous const block in expressions
 /// or patterns, or as a constant in types with const generics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GeneralConstId {
     ConstId(ConstId),
     AnonymousConstId(AnonymousConstId),
@@ -517,7 +594,7 @@ impl GeneralConstId {
 }
 
 /// The defs which have a body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DefWithBodyId {
     FunctionId(FunctionId),
     StaticId(StaticId),
@@ -544,7 +621,7 @@ impl DefWithBodyId {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum AssocItemId {
     FunctionId(FunctionId),
     ConstId(ConstId),
@@ -556,7 +633,7 @@ pub enum AssocItemId {
 // casting them, and somehow making the constructors private, which would be annoying.
 impl_from!(FunctionId, ConstId, TypeAliasId for AssocItemId);
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(TS, Serialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum GenericDefId {
     FunctionId(FunctionId),
     AdtId(AdtId),
@@ -592,7 +669,7 @@ impl From<AssocItemId> for GenericDefId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AttrDefId {
     ModuleId(ModuleId),
     FieldId(FieldId),
@@ -637,7 +714,7 @@ impl From<ItemContainerId> for AttrDefId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VariantId {
     EnumVariantId(EnumVariantId),
     StructId(StructId),
@@ -650,9 +727,9 @@ impl VariantId {
         match self {
             VariantId::StructId(it) => db.struct_data(it).variant_data.clone(),
             VariantId::UnionId(it) => db.union_data(it).variant_data.clone(),
-            VariantId::EnumVariantId(it) => {
-                db.enum_data(it.parent).variants[it.local_id].variant_data.clone()
-            }
+            VariantId::EnumVariantId(it) => db.enum_data(it.parent).variants[it.local_id]
+                .variant_data
+                .clone(),
         }
     }
 
@@ -862,7 +939,10 @@ impl AsMacroCall for InFile<&ast::MacroCall> {
         let expands_to = hir_expand::ExpandTo::from_call_site(self.value);
         let ast_id = AstId::new(self.file_id, db.ast_id_map(self.file_id).ast_id(self.value));
         let h = Hygiene::new(db, self.file_id);
-        let path = self.value.path().and_then(|path| path::ModPath::from_src(db, path, &h));
+        let path = self
+            .value
+            .path()
+            .and_then(|path| path::ModPath::from_src(db, path, &h));
 
         let Some(path) = path else {
             return Ok(ExpandResult::only_err(ExpandError::Other("malformed macro invocation".into())));
@@ -887,7 +967,10 @@ struct AstIdWithPath<T: ast::AstNode> {
 
 impl<T: ast::AstNode> AstIdWithPath<T> {
     fn new(file_id: HirFileId, ast_id: FileAstId<T>, path: path::ModPath) -> AstIdWithPath<T> {
-        AstIdWithPath { ast_id: AstId::new(file_id, ast_id), path }
+        AstIdWithPath {
+            ast_id: AstId::new(file_id, ast_id),
+            path,
+        }
     }
 }
 
@@ -908,8 +991,9 @@ fn macro_call_as_call_id_(
     krate: CrateId,
     resolver: impl Fn(path::ModPath) -> Option<MacroDefId>,
 ) -> Result<ExpandResult<Option<MacroCallId>>, UnresolvedMacro> {
-    let def =
-        resolver(call.path.clone()).ok_or_else(|| UnresolvedMacro { path: call.path.clone() })?;
+    let def = resolver(call.path.clone()).ok_or_else(|| UnresolvedMacro {
+        path: call.path.clone(),
+    })?;
 
     let res = if let MacroDefKind::BuiltInEager(..) = def.kind {
         let macro_call = InFile::new(call.ast_id.file_id, call.ast_id.to_node(db));
@@ -919,7 +1003,10 @@ fn macro_call_as_call_id_(
             value: Some(def.as_lazy_macro(
                 db,
                 krate,
-                MacroCallKind::FnLike { ast_id: call.ast_id, expand_to },
+                MacroCallKind::FnLike {
+                    ast_id: call.ast_id,
+                    expand_to,
+                },
             )),
             err: None,
         }
@@ -1006,8 +1093,9 @@ fn derive_macro_as_call_id(
     krate: CrateId,
     resolver: impl Fn(path::ModPath) -> Option<(MacroId, MacroDefId)>,
 ) -> Result<(MacroId, MacroDefId, MacroCallId), UnresolvedMacro> {
-    let (macro_id, def_id) = resolver(item_attr.path.clone())
-        .ok_or_else(|| UnresolvedMacro { path: item_attr.path.clone() })?;
+    let (macro_id, def_id) = resolver(item_attr.path.clone()).ok_or_else(|| UnresolvedMacro {
+        path: item_attr.path.clone(),
+    })?;
     let call_id = def_id.as_lazy_macro(
         db.upcast(),
         krate,
@@ -1055,4 +1143,23 @@ intern::impl_internable!(
     crate::type_ref::TypeBound,
     crate::path::GenericArgs,
     generics::GenericParams,
+);
+
+serialize_as_number!(
+    FunctionId,
+    StructId,
+    UnionId,
+    EnumId,
+    ConstId,
+    StaticId,
+    TraitId,
+    TraitAliasId,
+    TypeAliasId,
+    ImplId,
+    ExternBlockId,
+    Macro2Id,
+    MacroRulesId,
+    BlockId,
+    AnonymousConstId,
+    ProcMacroId,
 );

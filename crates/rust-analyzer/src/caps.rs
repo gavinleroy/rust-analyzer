@@ -23,6 +23,9 @@ use crate::semantic_tokens;
 
 pub fn server_capabilities(config: &Config) -> ServerCapabilities {
     ServerCapabilities {
+        // TODO(gavinleroy): why was this all of a sudden required? It's in the
+        // latest version but I don't remember updating RA????????
+        diagnostic_provider: None,
         position_encoding: match negotiated_encoding(config.caps()) {
             PositionEncoding::Utf8 => Some(PositionEncodingKind::UTF8),
             PositionEncoding::Wide(wide) => match wide {

@@ -71,7 +71,12 @@ fn eval_expr(ra_fixture: &str, minicore: &str) -> Result<Arc<Layout>, LayoutErro
         })
         .unwrap();
     let hir_body = db.body(adt_id.into());
-    let b = hir_body.bindings.iter().find(|x| x.1.name.to_smol_str() == "goal").unwrap().0;
+    let b = hir_body
+        .bindings
+        .iter()
+        .find(|x| x.1.name.to_smol_str() == "goal")
+        .unwrap()
+        .0;
     let infer = db.infer(adt_id.into());
     let goal_ty = infer.type_of_binding[b].clone();
     db.layout_of_ty(goal_ty, module_id.krate())

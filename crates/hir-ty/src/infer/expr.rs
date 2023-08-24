@@ -58,7 +58,10 @@ impl<'a> InferenceContext<'a> {
             if !could_unify {
                 self.result.type_mismatches.insert(
                     tgt_expr.into(),
-                    TypeMismatch { expected: expected_ty, actual: ty.clone() },
+                    TypeMismatch {
+                        expected: expected_ty,
+                        actual: ty.clone(),
+                    },
                 );
             }
         }
@@ -71,6 +74,7 @@ impl<'a> InferenceContext<'a> {
 
     /// Infer type of expression with possibly implicit coerce to the expected type.
     /// Return the type after possible coercion.
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(super) fn infer_expr_coerce(&mut self, expr: ExprId, expected: &Expectation) -> Ty {
         let ty = self.infer_expr_inner(expr, expected);
         if let Some(target) = expected.only_has_type(&mut self.table) {
@@ -79,7 +83,10 @@ impl<'a> InferenceContext<'a> {
                 Err(_) => {
                     self.result.type_mismatches.insert(
                         expr.into(),
-                        TypeMismatch { expected: target.clone(), actual: ty.clone() },
+                        TypeMismatch {
+                            expected: target.clone(),
+                            actual: ty.clone(),
+                        },
                     );
                     target
                 }
@@ -95,7 +102,11 @@ impl<'a> InferenceContext<'a> {
         // coercions from `!` to `expected`.
         if ty.is_never() {
             if let Some(adjustments) = self.result.expr_adjustments.get(&expr) {
-                return if let [Adjustment { kind: Adjust::NeverToAny, target }] = &**adjustments {
+                return if let [Adjustment {
+                    kind: Adjust::NeverToAny,
+                    target,
+                }] = &**adjustments
+                {
                     target.clone()
                 } else {
                     self.err_ty()
@@ -114,7 +125,10 @@ impl<'a> InferenceContext<'a> {
                 if !could_unify {
                     self.result.type_mismatches.insert(
                         expr.into(),
-                        TypeMismatch { expected: expected_ty, actual: ty.clone() },
+                        TypeMismatch {
+                            expected: expected_ty,
+                            actual: ty.clone(),
+                        },
                     );
                 }
             }
@@ -122,12 +136,22 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn infer_expr_inner(&mut self, tgt_expr: ExprId, expected: &Expectation) -> Ty {
         self.db.unwind_if_cancelled();
 
+        {
+            let expr = &self.body[tgt_expr];
+            tracing::debug!(?tgt_expr, ?expr, "inferring Expr");
+        }
+
         let ty = match &self.body[tgt_expr] {
             Expr::Missing => self.err_ty(),
-            &Expr::If { condition, then_branch, else_branch } => {
+            &Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 let expected = &expected.adjust_for_branches(&mut self.table);
                 self.infer_expr_coerce_never(
                     condition,
@@ -139,7 +163,12 @@ impl<'a> InferenceContext<'a> {
                 let then_ty = self.infer_expr_inner(then_branch, expected);
                 let then_diverges = mem::replace(&mut self.diverges, Diverges::Maybe);
                 let mut coerce = CoerceMany::new(expected.coercion_target_type(&mut self.table));
-                coerce.coerce(self, Some(then_branch), &then_ty, CoercionCause::Expr(then_branch));
+                coerce.coerce(
+                    self,
+                    Some(then_branch),
+                    &then_ty,
+                    CoercionCause::Expr(then_branch),
+                );
                 match else_branch {
                     Some(else_branch) => {
                         let else_ty = self.infer_expr_inner(else_branch, expected);
@@ -165,12 +194,17 @@ impl<'a> InferenceContext<'a> {
                 self.infer_top_pat(pat, &input_ty);
                 self.result.standard_types.bool_.clone()
             }
-            Expr::Block { statements, tail, label, id } => {
-                self.infer_block(tgt_expr, *id, statements, *tail, *label, expected)
-            }
-            Expr::Unsafe { id, statements, tail } => {
-                self.infer_block(tgt_expr, *id, statements, *tail, None, expected)
-            }
+            Expr::Block {
+                statements,
+                tail,
+                label,
+                id,
+            } => self.infer_block(tgt_expr, *id, statements, *tail, *label, expected),
+            Expr::Unsafe {
+                id,
+                statements,
+                tail,
+            } => self.infer_block(tgt_expr, *id, statements, *tail, None, expected),
             Expr::Const(id) => {
                 self.with_breakable_ctx(BreakableKind::Border, None, None, |this| {
                     let (_, expr) = this.db.lookup_intern_anonymous_const(*id);
@@ -178,9 +212,11 @@ impl<'a> InferenceContext<'a> {
                 })
                 .1
             }
-            Expr::Async { id, statements, tail } => {
-                self.infer_async_block(tgt_expr, id, statements, tail)
-            }
+            Expr::Async {
+                id,
+                statements,
+                tail,
+            } => self.infer_async_block(tgt_expr, id, statements, tail),
             &Expr::Loop { body, label } => {
                 // FIXME: should be:
                 // let ty = expected.coercion_target_type(&mut self.table);
@@ -198,7 +234,11 @@ impl<'a> InferenceContext<'a> {
                     None => self.result.standard_types.never.clone(),
                 }
             }
-            &Expr::While { condition, body, label } => {
+            &Expr::While {
+                condition,
+                body,
+                label,
+            } => {
                 self.with_breakable_ctx(BreakableKind::Loop, None, label, |this| {
                     this.infer_expr(
                         condition,
@@ -211,7 +251,14 @@ impl<'a> InferenceContext<'a> {
                 self.diverges = Diverges::Maybe;
                 TyBuilder::unit()
             }
-            Expr::Closure { body, args, ret_type, arg_types, closure_kind, capture_by: _ } => {
+            Expr::Closure {
+                body,
+                args,
+                ret_type,
+                arg_types,
+                closure_kind,
+                capture_by: _,
+            } => {
                 assert_eq!(args.len(), arg_types.len());
 
                 let mut sig_tys = Vec::with_capacity(arg_types.len() + 1);
@@ -238,7 +285,11 @@ impl<'a> InferenceContext<'a> {
 
                 let sig_ty = TyKind::Function(FnPointer {
                     num_binders: 0,
-                    sig: FnSig { abi: (), safety: chalk_ir::Safety::Safe, variadic: false },
+                    sig: FnSig {
+                        abi: (),
+                        safety: chalk_ir::Safety::Safe,
+                        variadic: false,
+                    },
                     substitution: FnSubst(
                         Substitution::from_iter(Interner, sig_tys.iter().cloned())
                             .shifted_in(Interner),
@@ -277,7 +328,10 @@ impl<'a> InferenceContext<'a> {
                         .intern(Interner);
                         self.deferred_closures.entry(closure_id).or_default();
                         if let Some(c) = self.current_closure {
-                            self.closure_dependencies.entry(c).or_default().push(closure_id);
+                            self.closure_dependencies
+                                .entry(c)
+                                .or_default()
+                                .push(closure_id);
                         }
                         (Some(closure_id), closure_ty, None)
                     }
@@ -329,14 +383,17 @@ impl<'a> InferenceContext<'a> {
                 };
                 // if the function is unresolved, we use is_varargs=true to
                 // suppress the arg count diagnostic here
-                let is_varargs =
-                    derefed_callee.callable_sig(self.db).map_or(false, |sig| sig.is_varargs)
-                        || res.is_none();
+                let is_varargs = derefed_callee
+                    .callable_sig(self.db)
+                    .map_or(false, |sig| sig.is_varargs)
+                    || res.is_none();
                 let (param_tys, ret_ty) = match res {
                     Some((func, params, ret_ty)) => {
                         let mut adjustments = auto_deref_adjust_steps(&derefs);
-                        if let TyKind::Closure(c, _) =
-                            self.table.resolve_completely(callee_ty.clone()).kind(Interner)
+                        if let TyKind::Closure(c, _) = self
+                            .table
+                            .resolve_completely(callee_ty.clone())
+                            .kind(Interner)
                         {
                             if let Some(par) = self.current_closure {
                                 self.closure_dependencies.entry(par).or_default().push(*c);
@@ -362,10 +419,12 @@ impl<'a> InferenceContext<'a> {
                         (params, ret_ty)
                     }
                     None => {
-                        self.result.diagnostics.push(InferenceDiagnostic::ExpectedFunction {
-                            call_expr: tgt_expr,
-                            found: callee_ty.clone(),
-                        });
+                        self.result
+                            .diagnostics
+                            .push(InferenceDiagnostic::ExpectedFunction {
+                                call_expr: tgt_expr,
+                                found: callee_ty.clone(),
+                            });
                         (Vec::new(), self.err_ty())
                     }
                 };
@@ -388,15 +447,19 @@ impl<'a> InferenceContext<'a> {
                 );
                 self.normalize_associated_types_in(ret_ty)
             }
-            Expr::MethodCall { receiver, args, method_name, generic_args } => self
-                .infer_method_call(
-                    tgt_expr,
-                    *receiver,
-                    args,
-                    method_name,
-                    generic_args.as_deref(),
-                    expected,
-                ),
+            Expr::MethodCall {
+                receiver,
+                args,
+                method_name,
+                generic_args,
+            } => self.infer_method_call(
+                tgt_expr,
+                *receiver,
+                args,
+                method_name,
+                generic_args.as_deref(),
+                expected,
+            ),
             Expr::Match { expr, arms } => {
                 let input_ty = self.infer_expr(*expr, &Expectation::none());
 
@@ -443,8 +506,12 @@ impl<'a> InferenceContext<'a> {
                 }
             }
             Expr::Path(p) => {
-                let g = self.resolver.update_to_inner_scope(self.db.upcast(), self.owner, tgt_expr);
-                let ty = self.infer_path(p, tgt_expr.into()).unwrap_or_else(|| self.err_ty());
+                let g = self
+                    .resolver
+                    .update_to_inner_scope(self.db.upcast(), self.owner, tgt_expr);
+                let ty = self
+                    .infer_path(p, tgt_expr.into())
+                    .unwrap_or_else(|| self.err_ty());
                 self.resolver.reset_to_guard(g);
                 ty
             }
@@ -527,7 +594,12 @@ impl<'a> InferenceContext<'a> {
                 }
                 self.result.standard_types.never.clone()
             }
-            Expr::RecordLit { path, fields, spread, .. } => {
+            Expr::RecordLit {
+                path,
+                fields,
+                spread,
+                ..
+            } => {
                 let (ty, def_id) = self.resolve_variant(path.as_deref(), false);
                 if let Some(variant) = def_id {
                     self.write_variant_resolution(tgt_expr.into(), variant);
@@ -545,17 +617,24 @@ impl<'a> InferenceContext<'a> {
                 let variant_data = def_id.map(|it| it.variant_data(self.db.upcast()));
                 for field in fields.iter() {
                     let field_def =
-                        variant_data.as_ref().and_then(|it| match it.field(&field.name) {
-                            Some(local_id) => Some(FieldId { parent: def_id.unwrap(), local_id }),
-                            None => {
-                                self.push_diagnostic(InferenceDiagnostic::NoSuchField {
-                                    expr: field.expr,
-                                });
-                                None
-                            }
-                        });
+                        variant_data
+                            .as_ref()
+                            .and_then(|it| match it.field(&field.name) {
+                                Some(local_id) => Some(FieldId {
+                                    parent: def_id.unwrap(),
+                                    local_id,
+                                }),
+                                None => {
+                                    self.push_diagnostic(InferenceDiagnostic::NoSuchField {
+                                        expr: field.expr,
+                                    });
+                                    None
+                                }
+                            });
                     let field_ty = field_def.map_or(self.err_ty(), |it| {
-                        field_types[it.local_id].clone().substitute(Interner, &substs)
+                        field_types[it.local_id]
+                            .clone()
+                            .substitute(Interner, &substs)
                     });
                     // Field type might have some unknown types
                     // FIXME: we may want to emit a single type variable for all instance of type fields?
@@ -586,7 +665,11 @@ impl<'a> InferenceContext<'a> {
                 }
                 cast_ty
             }
-            Expr::Ref { expr, rawness, mutability } => {
+            Expr::Ref {
+                expr,
+                rawness,
+                mutability,
+            } => {
                 let mutability = lower_to_chalk_mutability(*mutability);
                 let expectation = if let Some((exp_inner, exp_rawness, exp_mutability)) = expected
                     .only_has_type(&mut self.table)
@@ -620,8 +703,10 @@ impl<'a> InferenceContext<'a> {
                 match op {
                     UnaryOp::Deref => {
                         if let Some(deref_trait) = self.resolve_lang_trait(LangItem::Deref) {
-                            if let Some(deref_fn) =
-                                self.db.trait_data(deref_trait).method_by_name(&name![deref])
+                            if let Some(deref_fn) = self
+                                .db
+                                .trait_data(deref_trait)
+                                .method_by_name(&name![deref])
                             {
                                 // FIXME: this is wrong in multiple ways, subst is empty, and we emit it even for builtin deref (note that
                                 // the mutability is not wrong, and will be fixed in `self.infer_mut`).
@@ -702,7 +787,11 @@ impl<'a> InferenceContext<'a> {
                 Some(op) => self.infer_overloadable_binop(*lhs, *op, *rhs, tgt_expr),
                 _ => self.err_ty(),
             },
-            Expr::Range { lhs, rhs, range_type } => {
+            Expr::Range {
+                lhs,
+                rhs,
+                range_type,
+            } => {
                 let lhs_ty = lhs.map(|e| self.infer_expr_inner(e, &Expectation::none()));
                 let rhs_expect = lhs_ty
                     .as_ref()
@@ -759,8 +848,10 @@ impl<'a> InferenceContext<'a> {
                     // mutability will be fixed up in `InferenceContext::infer_mut`;
                     adj.push(Adjustment::borrow(Mutability::Not, self_ty.clone()));
                     self.write_expr_adj(*base, adj);
-                    if let Some(func) =
-                        self.db.trait_data(index_trait).method_by_name(&name!(index))
+                    if let Some(func) = self
+                        .db
+                        .trait_data(index_trait)
+                        .method_by_name(&name!(index))
                     {
                         let substs = TyBuilder::subst_for_def(self.db, index_trait, None)
                             .push(self_ty.clone())
@@ -789,7 +880,9 @@ impl<'a> InferenceContext<'a> {
                         .chain(repeat_with(|| self.table.new_type_var()))
                         .take(exprs.len())
                         .collect::<Vec<_>>(),
-                    _ => (0..exprs.len()).map(|_| self.table.new_type_var()).collect(),
+                    _ => (0..exprs.len())
+                        .map(|_| self.table.new_type_var())
+                        .collect(),
                 };
 
                 for (expr, ty) in exprs.iter().zip(tys.iter_mut()) {
@@ -801,10 +894,12 @@ impl<'a> InferenceContext<'a> {
             Expr::Array(array) => self.infer_expr_array(array, expected),
             Expr::Literal(lit) => match lit {
                 Literal::Bool(..) => self.result.standard_types.bool_.clone(),
-                Literal::String(..) => {
-                    TyKind::Ref(Mutability::Not, static_lifetime(), TyKind::Str.intern(Interner))
-                        .intern(Interner)
-                }
+                Literal::String(..) => TyKind::Ref(
+                    Mutability::Not,
+                    static_lifetime(),
+                    TyKind::Str.intern(Interner),
+                )
+                .intern(Interner),
                 Literal::ByteString(bs) => {
                     let byte_type = TyKind::Scalar(Scalar::Uint(UintTy::U8)).intern(Interner);
 
@@ -859,7 +954,9 @@ impl<'a> InferenceContext<'a> {
                 // which are handled by `infer_assignee_expr()`.
                 // Any other underscore expression is an error, we render a specialized diagnostic
                 // to let the user know what type is expected though.
-                let expected = expected.to_option(&mut self.table).unwrap_or_else(|| self.err_ty());
+                let expected = expected
+                    .to_option(&mut self.table)
+                    .unwrap_or_else(|| self.err_ty());
                 self.push_diagnostic(InferenceDiagnostic::TypedHole {
                     expr: tgt_expr,
                     expected: expected.clone(),
@@ -867,6 +964,9 @@ impl<'a> InferenceContext<'a> {
                 expected
             }
         };
+
+        tracing::debug!(?tgt_expr, ?ty, "Ty Resolved");
+
         // use a new type variable if we got unknown here
         let ty = self.insert_type_vars_shallow(ty);
         self.write_expr_ty(tgt_expr, ty.clone());
@@ -887,11 +987,20 @@ impl<'a> InferenceContext<'a> {
         let ret_ty = self.table.new_type_var();
         let prev_diverges = mem::replace(&mut self.diverges, Diverges::Maybe);
         let prev_ret_ty = mem::replace(&mut self.return_ty, ret_ty.clone());
-        let prev_ret_coercion =
-            mem::replace(&mut self.return_coercion, Some(CoerceMany::new(ret_ty.clone())));
+        let prev_ret_coercion = mem::replace(
+            &mut self.return_coercion,
+            Some(CoerceMany::new(ret_ty.clone())),
+        );
 
         let (_, inner_ty) = self.with_breakable_ctx(BreakableKind::Border, None, None, |this| {
-            this.infer_block(tgt_expr, *id, statements, *tail, None, &Expectation::has_type(ret_ty))
+            this.infer_block(
+                tgt_expr,
+                *id,
+                statements,
+                *tail,
+                None,
+                &Expectation::has_type(ret_ty),
+            )
         });
 
         self.diverges = prev_diverges;
@@ -932,8 +1041,10 @@ impl<'a> InferenceContext<'a> {
                         .unwrap_or(true)
                     {
                         // prefer reborrow to move
-                        adjustments
-                            .push(Adjustment { kind: Adjust::Deref(None), target: inner.clone() });
+                        adjustments.push(Adjustment {
+                            kind: Adjust::Deref(None),
+                            target: inner.clone(),
+                        });
                         adjustments.push(Adjustment::borrow(Mutability::Mut, inner.clone()))
                     }
                 } else {
@@ -941,7 +1052,10 @@ impl<'a> InferenceContext<'a> {
                 }
             }
             FnTrait::Fn => {
-                if !matches!(derefed_callee.kind(Interner), TyKind::Ref(Mutability::Not, _, _)) {
+                if !matches!(
+                    derefed_callee.kind(Interner),
+                    TyKind::Ref(Mutability::Not, _, _)
+                ) {
                     adjustments.push(Adjustment::borrow(Mutability::Not, derefed_callee.clone()));
                 }
             }
@@ -964,7 +1078,11 @@ impl<'a> InferenceContext<'a> {
         array: &Array,
         expected: &Expectation,
     ) -> chalk_ir::Ty<Interner> {
-        let elem_ty = match expected.to_option(&mut self.table).as_ref().map(|t| t.kind(Interner)) {
+        let elem_ty = match expected
+            .to_option(&mut self.table)
+            .as_ref()
+            .map(|t| t.kind(Interner))
+        {
             Some(TyKind::Array(st, _) | TyKind::Slice(st)) => st.clone(),
             _ => self.table.new_type_var(),
         };
@@ -987,7 +1105,10 @@ impl<'a> InferenceContext<'a> {
                     consteval::usize_const(self.db, Some(elements.len() as u128), krate),
                 )
             }
-            &Array::Repeat { initializer, repeat } => {
+            &Array::Repeat {
+                initializer,
+                repeat,
+            } => {
                 self.infer_expr_coerce(initializer, &Expectation::has_type(elem_ty.clone()));
                 let usize = TyKind::Scalar(Scalar::Uint(UintTy::Usize)).intern(Interner);
                 match self.body[repeat] {
@@ -1019,6 +1140,7 @@ impl<'a> InferenceContext<'a> {
         TyKind::Array(elem_ty, len).intern(Interner)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(super) fn infer_return(&mut self, expr: ExprId) {
         let ret_ty = self
             .return_coercion
@@ -1081,7 +1203,11 @@ impl<'a> InferenceContext<'a> {
         let is_rest_expr = |expr| {
             matches!(
                 &self.body[expr],
-                Expr::Range { lhs: None, rhs: None, range_type: RangeOp::Exclusive },
+                Expr::Range {
+                    lhs: None,
+                    rhs: None,
+                    range_type: RangeOp::Exclusive
+                },
             )
         };
 
@@ -1092,7 +1218,11 @@ impl<'a> InferenceContext<'a> {
                 // We don't consider multiple ellipses. This is analogous to
                 // `hir_def::body::lower::ExprCollector::collect_tuple_pat()`.
                 let ellipsis = exprs.iter().position(|e| is_rest_expr(*e));
-                let exprs: Vec<_> = exprs.iter().filter(|e| !is_rest_expr(**e)).copied().collect();
+                let exprs: Vec<_> = exprs
+                    .iter()
+                    .filter(|e| !is_rest_expr(**e))
+                    .copied()
+                    .collect();
 
                 self.infer_tuple_pat_like(&rhs_ty, (), ellipsis, &exprs)
             }
@@ -1106,7 +1236,11 @@ impl<'a> InferenceContext<'a> {
                 // We don't consider multiple ellipses. This is analogous to
                 // `hir_def::body::lower::ExprCollector::collect_tuple_pat()`.
                 let ellipsis = args.iter().position(|e| is_rest_expr(*e));
-                let args: Vec<_> = args.iter().filter(|e| !is_rest_expr(**e)).copied().collect();
+                let args: Vec<_> = args
+                    .iter()
+                    .filter(|e| !is_rest_expr(**e))
+                    .copied()
+                    .collect();
 
                 self.infer_tuple_struct_pat_like(path, &rhs_ty, (), lhs, ellipsis, &args)
             }
@@ -1155,7 +1289,10 @@ impl<'a> InferenceContext<'a> {
                     Err(_) => {
                         self.result.type_mismatches.insert(
                             lhs.into(),
-                            TypeMismatch { expected: rhs_ty.clone(), actual: lhs_ty.clone() },
+                            TypeMismatch {
+                                expected: rhs_ty.clone(),
+                                actual: lhs_ty.clone(),
+                            },
                         );
                         // `rhs_ty` is returned so no further type mismatches are
                         // reported because of this mismatch.
@@ -1169,9 +1306,13 @@ impl<'a> InferenceContext<'a> {
 
         let ty = self.insert_type_vars_shallow(ty);
         if !self.unify(&ty, &rhs_ty) {
-            self.result
-                .type_mismatches
-                .insert(lhs.into(), TypeMismatch { expected: rhs_ty.clone(), actual: ty.clone() });
+            self.result.type_mismatches.insert(
+                lhs.into(),
+                TypeMismatch {
+                    expected: rhs_ty.clone(),
+                    actual: ty.clone(),
+                },
+            );
         }
         self.write_expr_ty(lhs, ty.clone());
         ty
@@ -1279,7 +1420,9 @@ impl<'a> InferenceContext<'a> {
         expected: &Expectation,
     ) -> Ty {
         let coerce_ty = expected.coercion_target_type(&mut self.table);
-        let g = self.resolver.update_to_inner_scope(self.db.upcast(), self.owner, expr);
+        let g = self
+            .resolver
+            .update_to_inner_scope(self.db.upcast(), self.owner, expr);
         let prev_env = block_id.map(|block_id| {
             let prev_env = self.table.trait_env.clone();
             Arc::make_mut(&mut self.table.trait_env).block = Some(block_id);
@@ -1290,7 +1433,12 @@ impl<'a> InferenceContext<'a> {
             self.with_breakable_ctx(BreakableKind::Block, Some(coerce_ty), label, |this| {
                 for stmt in statements {
                     match stmt {
-                        Statement::Let { pat, type_ref, initializer, else_branch } => {
+                        Statement::Let {
+                            pat,
+                            type_ref,
+                            initializer,
+                            else_branch,
+                        } => {
                             let decl_ty = type_ref
                                 .as_ref()
                                 .map(|tr| this.make_ty(tr))
@@ -1401,12 +1549,18 @@ impl<'a> InferenceContext<'a> {
                 }
                 TyKind::Adt(AdtId(hir_def::AdtId::StructId(s)), parameters) => {
                     let local_id = self.db.struct_data(*s).variant_data.field(name)?;
-                    let field = FieldId { parent: (*s).into(), local_id };
+                    let field = FieldId {
+                        parent: (*s).into(),
+                        local_id,
+                    };
                     (field, parameters.clone())
                 }
                 TyKind::Adt(AdtId(hir_def::AdtId::UnionId(u)), parameters) => {
                     let local_id = self.db.union_data(*u).variant_data.field(name)?;
-                    let field = FieldId { parent: (*u).into(), local_id };
+                    let field = FieldId {
+                        parent: (*u).into(),
+                        local_id,
+                    };
                     (field, parameters.clone())
                 }
                 _ => return None,
@@ -1460,7 +1614,10 @@ impl<'a> InferenceContext<'a> {
                         // FIXME: Merge this diagnostic into UnresolvedField?
                         self.result
                             .diagnostics
-                            .push(InferenceDiagnostic::PrivateField { expr: tgt_expr, field });
+                            .push(InferenceDiagnostic::PrivateField {
+                                expr: tgt_expr,
+                                field,
+                            });
                     }
                 }
                 ty
@@ -1481,12 +1638,14 @@ impl<'a> InferenceContext<'a> {
                     )
                     .is_some()
                 };
-                self.result.diagnostics.push(InferenceDiagnostic::UnresolvedField {
-                    expr: tgt_expr,
-                    receiver: receiver_ty,
-                    name: name.clone(),
-                    method_with_same_name_exists,
-                });
+                self.result
+                    .diagnostics
+                    .push(InferenceDiagnostic::UnresolvedField {
+                        expr: tgt_expr,
+                        receiver: receiver_ty,
+                        name: name.clone(),
+                        method_with_same_name_exists,
+                    });
                 self.err_ty()
             }
         }
@@ -1539,12 +1698,14 @@ impl<'a> InferenceContext<'a> {
                     }
                     None => None,
                 };
-                self.result.diagnostics.push(InferenceDiagnostic::UnresolvedMethodCall {
-                    expr: tgt_expr,
-                    receiver: receiver_ty.clone(),
-                    name: method_name.clone(),
-                    field_with_same_name: field_with_same_name_exists,
-                });
+                self.result
+                    .diagnostics
+                    .push(InferenceDiagnostic::UnresolvedMethodCall {
+                        expr: tgt_expr,
+                        receiver: receiver_ty.clone(),
+                        name: method_name.clone(),
+                        field_with_same_name: field_with_same_name_exists,
+                    });
                 (
                     receiver_ty,
                     Binders::empty(Interner, self.err_ty()),
@@ -1575,10 +1736,18 @@ impl<'a> InferenceContext<'a> {
         let expected_inputs =
             self.expected_inputs_for_expected_output(expected, ret_ty.clone(), param_tys.clone());
 
-        self.check_call_arguments(tgt_expr, args, &expected_inputs, &param_tys, &[], is_varargs);
+        self.check_call_arguments(
+            tgt_expr,
+            args,
+            &expected_inputs,
+            &param_tys,
+            &[],
+            is_varargs,
+        );
         self.normalize_associated_types_in(ret_ty)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn expected_inputs_for_expected_output(
         &mut self,
         expected_output: &Expectation,
@@ -1606,6 +1775,7 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn check_call_arguments(
         &mut self,
         expr: ExprId,
@@ -1677,13 +1847,17 @@ impl<'a> InferenceContext<'a> {
                 if self.coerce(Some(arg), &ty, &coercion_target).is_err() {
                     self.result.type_mismatches.insert(
                         arg.into(),
-                        TypeMismatch { expected: coercion_target, actual: ty.clone() },
+                        TypeMismatch {
+                            expected: coercion_target,
+                            actual: ty.clone(),
+                        },
                     );
                 }
             }
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn substs_for_method_call(
         &mut self,
         def_generics: Generics,
@@ -1749,6 +1923,7 @@ impl<'a> InferenceContext<'a> {
         Substitution::from_iter(Interner, substs)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn register_obligations_for_call(&mut self, callable_ty: &Ty) {
         let callable_ty = self.resolve_ty_shallow(callable_ty);
         if let TyKind::FnDef(fn_def, parameters) = callable_ty.kind(Interner) {
@@ -1776,8 +1951,11 @@ impl<'a> InferenceContext<'a> {
                             &parameters.as_slice(Interner)[params_len - trait_params_len..],
                         );
                         self.push_obligation(
-                            TraitRef { trait_id: to_chalk_trait_id(trait_), substitution: substs }
-                                .cast(Interner),
+                            TraitRef {
+                                trait_id: to_chalk_trait_id(trait_),
+                                substitution: substs,
+                            }
+                            .cast(Interner),
                         );
                     }
                 }
@@ -1819,7 +1997,12 @@ impl<'a> InferenceContext<'a> {
         }
 
         // check legacy const parameters
-        for (subst_idx, arg_idx) in data.legacy_const_generics_indices.iter().copied().enumerate() {
+        for (subst_idx, arg_idx) in data
+            .legacy_const_generics_indices
+            .iter()
+            .copied()
+            .enumerate()
+        {
             let arg = match subst.at(Interner, subst_idx).constant(Interner) {
                 Some(c) => c,
                 None => continue, // not a const parameter?
@@ -1965,10 +2148,22 @@ impl<'a> InferenceContext<'a> {
         cb: impl FnOnce(&mut Self) -> T,
     ) -> (Option<Ty>, T) {
         self.breakables.push({
-            BreakableContext { kind, may_break: false, coerce: ty.map(CoerceMany::new), label }
+            BreakableContext {
+                kind,
+                may_break: false,
+                coerce: ty.map(CoerceMany::new),
+                label,
+            }
         });
         let res = cb(self);
         let ctx = self.breakables.pop().expect("breakable stack broken");
-        (if ctx.may_break { ctx.coerce.map(|ctx| ctx.complete(self)) } else { None }, res)
+        (
+            if ctx.may_break {
+                ctx.coerce.map(|ctx| ctx.complete(self))
+            } else {
+                None
+            },
+            res,
+        )
     }
 }

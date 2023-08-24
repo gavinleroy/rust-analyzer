@@ -30,11 +30,11 @@ impl ToChalk for hir_def::ImplId {
     type Chalk = chalk_db::ImplId;
 
     fn to_chalk(self, _db: &dyn HirDatabase) -> chalk_db::ImplId {
-        chalk_ir::ImplId(self.as_intern_id())
+        chalk_ir::ImplId(self.as_intern_id().into())
     }
 
     fn from_chalk(_db: &dyn HirDatabase, impl_id: chalk_db::ImplId) -> hir_def::ImplId {
-        InternKey::from_intern_id(impl_id.0)
+        InternKey::from_intern_id(*impl_id.0)
     }
 }
 
@@ -56,79 +56,79 @@ impl ToChalk for TypeAliasAsValue {
     type Chalk = chalk_db::AssociatedTyValueId;
 
     fn to_chalk(self, _db: &dyn HirDatabase) -> chalk_db::AssociatedTyValueId {
-        rust_ir::AssociatedTyValueId(self.0.as_intern_id())
+        rust_ir::AssociatedTyValueId(self.0.as_intern_id().into())
     }
 
     fn from_chalk(
         _db: &dyn HirDatabase,
         assoc_ty_value_id: chalk_db::AssociatedTyValueId,
     ) -> TypeAliasAsValue {
-        TypeAliasAsValue(TypeAliasId::from_intern_id(assoc_ty_value_id.0))
+        TypeAliasAsValue(TypeAliasId::from_intern_id(*assoc_ty_value_id.0))
     }
 }
 
 impl From<FnDefId> for crate::db::InternedCallableDefId {
     fn from(fn_def_id: FnDefId) -> Self {
-        InternKey::from_intern_id(fn_def_id.0)
+        InternKey::from_intern_id(*fn_def_id.0)
     }
 }
 
 impl From<crate::db::InternedCallableDefId> for FnDefId {
     fn from(callable_def_id: crate::db::InternedCallableDefId) -> Self {
-        chalk_ir::FnDefId(callable_def_id.as_intern_id())
+        chalk_ir::FnDefId(callable_def_id.as_intern_id().into())
     }
 }
 
 impl From<OpaqueTyId> for crate::db::InternedOpaqueTyId {
     fn from(id: OpaqueTyId) -> Self {
-        InternKey::from_intern_id(id.0)
+        InternKey::from_intern_id(*id.0)
     }
 }
 
 impl From<crate::db::InternedOpaqueTyId> for OpaqueTyId {
     fn from(id: crate::db::InternedOpaqueTyId) -> Self {
-        chalk_ir::OpaqueTyId(id.as_intern_id())
+        chalk_ir::OpaqueTyId(id.as_intern_id().into())
     }
 }
 
 impl From<chalk_ir::ClosureId<Interner>> for crate::db::InternedClosureId {
     fn from(id: chalk_ir::ClosureId<Interner>) -> Self {
-        Self::from_intern_id(id.0)
+        Self::from_intern_id(*id.0)
     }
 }
 
 impl From<crate::db::InternedClosureId> for chalk_ir::ClosureId<Interner> {
     fn from(id: crate::db::InternedClosureId) -> Self {
-        chalk_ir::ClosureId(id.as_intern_id())
+        chalk_ir::ClosureId(id.as_intern_id().into())
     }
 }
 
 impl From<chalk_ir::GeneratorId<Interner>> for crate::db::InternedGeneratorId {
     fn from(id: chalk_ir::GeneratorId<Interner>) -> Self {
-        Self::from_intern_id(id.0)
+        Self::from_intern_id(*id.0)
     }
 }
 
 impl From<crate::db::InternedGeneratorId> for chalk_ir::GeneratorId<Interner> {
     fn from(id: crate::db::InternedGeneratorId) -> Self {
-        chalk_ir::GeneratorId(id.as_intern_id())
+        chalk_ir::GeneratorId(id.as_intern_id().into())
     }
 }
 
 pub fn to_foreign_def_id(id: TypeAliasId) -> ForeignDefId {
-    chalk_ir::ForeignDefId(salsa::InternKey::as_intern_id(&id))
+    chalk_ir::ForeignDefId(salsa::InternKey::as_intern_id(&id).into())
 }
 
 pub fn from_foreign_def_id(id: ForeignDefId) -> TypeAliasId {
-    salsa::InternKey::from_intern_id(id.0)
+    salsa::InternKey::from_intern_id(*id.0)
 }
 
 pub fn to_assoc_type_id(id: TypeAliasId) -> AssocTypeId {
-    chalk_ir::AssocTypeId(salsa::InternKey::as_intern_id(&id))
+    chalk_ir::AssocTypeId(salsa::InternKey::as_intern_id(&id).into())
 }
 
 pub fn from_assoc_type_id(id: AssocTypeId) -> TypeAliasId {
-    salsa::InternKey::from_intern_id(id.0)
+    salsa::InternKey::from_intern_id(*id.0)
 }
 
 pub fn from_placeholder_idx(db: &dyn HirDatabase, idx: PlaceholderIndex) -> TypeOrConstParamId {
@@ -152,9 +152,9 @@ pub fn lt_from_placeholder_idx(db: &dyn HirDatabase, idx: PlaceholderIndex) -> L
 }
 
 pub fn to_chalk_trait_id(id: TraitId) -> ChalkTraitId {
-    chalk_ir::TraitId(salsa::InternKey::as_intern_id(&id))
+    chalk_ir::TraitId(salsa::InternKey::as_intern_id(&id).into())
 }
 
 pub fn from_chalk_trait_id(id: ChalkTraitId) -> TraitId {
-    salsa::InternKey::from_intern_id(id.0)
+    salsa::InternKey::from_intern_id(*id.0)
 }

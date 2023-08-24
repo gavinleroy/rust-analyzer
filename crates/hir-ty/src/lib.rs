@@ -1,6 +1,11 @@
 //! The type system. We currently use this to infer types for completion, hover
 //! information and various assists.
-#![warn(rust_2018_idioms, unused_lifetimes, semicolon_in_expressions_from_macros)]
+#![warn(
+    rust_2018_idioms,
+    unused_lifetimes,
+    semicolon_in_expressions_from_macros
+)]
+#![feature(box_patterns, unboxed_closures, fn_traits)]
 
 #[allow(unused)]
 macro_rules! eprintln {
@@ -10,6 +15,8 @@ macro_rules! eprintln {
 mod builder;
 mod chalk_db;
 mod chalk_ext;
+#[cfg(test)]
+mod export_bindings;
 mod infer;
 mod inhabitedness;
 mod interner;
@@ -28,12 +35,13 @@ pub mod layout;
 pub mod method_resolution;
 pub mod mir;
 pub mod primitive;
+pub mod proof_tree;
 pub mod traits;
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod test_db;
+#[cfg(test)]
+mod tests;
 
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -55,6 +63,9 @@ use rustc_hash::FxHashSet;
 use traits::FnTrait;
 use triomphe::Arc;
 use utils::Generics;
+
+use serde::Serialize;
+use ts_rs::TS;
 
 use crate::{
     consteval::unknown_const, db::HirDatabase, infer::unify::InferenceTable, utils::generics,
@@ -151,13 +162,16 @@ pub type Solution = chalk_solve::Solution<Interner>;
 pub type ConstrainedSubst = chalk_ir::ConstrainedSubst<Interner>;
 pub type Guidance = chalk_solve::Guidance<Interner>;
 pub type WhereClause = chalk_ir::WhereClause<Interner>;
+pub type ProofTree = argus::proof_tree::flat::ProofTreeNav<Interner>;
+pub type TracedSolution = (Option<Solution>, ProofTree);
 
 /// A constant can have reference to other things. Memory map job is holding
 /// the necessary bits of memory of the const eval session to keep the constant
 /// meaningful.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(TS, Debug, Default, Clone, PartialEq, Eq)]
 pub struct MemoryMap {
     pub memory: HashMap<usize, Vec<u8>>,
+    #[ts(skip)]
     pub vtable: VTableMap,
 }
 
@@ -195,11 +209,15 @@ impl MemoryMap {
 }
 
 /// A concrete constant value
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(TS, Serialize, Debug, Clone, PartialEq, Eq)]
 pub enum ConstScalar {
+    #[ts(skip)]
+    #[serde(skip)]
     Bytes(Vec<u8>, MemoryMap),
     // FIXME: this is a hack to get around chalk not being able to represent unevaluatable
     // constants
+    #[ts(skip)]
+    #[serde(skip)]
     UnevaluatedConst(GeneralConstId, Substitution),
     /// Case of an unknown value that rustc might know but we don't
     // FIXME: this is a hack to get around chalk not being able to represent unevaluatable
@@ -227,7 +245,10 @@ pub(crate) fn wrap_empty_binders<T>(value: T) -> Binders<T>
 where
     T: TypeFoldable<Interner> + HasInterner<Interner = Interner>,
 {
-    Binders::empty(Interner, value.shifted_in_from(Interner, DebruijnIndex::ONE))
+    Binders::empty(
+        Interner,
+        value.shifted_in_from(Interner, DebruijnIndex::ONE),
+    )
 }
 
 pub(crate) fn make_type_and_const_binders<T: HasInterner<Interner = Interner>>(
@@ -255,7 +276,9 @@ pub(crate) fn make_single_type_binders<T: HasInterner<Interner = Interner>>(
     Binders::new(
         VariableKinds::from_iter(
             Interner,
-            std::iter::once(chalk_ir::VariableKind::Ty(chalk_ir::TyVariableKind::General)),
+            std::iter::once(chalk_ir::VariableKind::Ty(
+                chalk_ir::TyVariableKind::General,
+            )),
         ),
         value,
     )
@@ -285,8 +308,9 @@ pub(crate) fn make_binders<T: HasInterner<Interner = Interner>>(
 // FIXME: get rid of this, just replace it by FnPointer
 /// A function signature as seen by type inference: Several parameter types and
 /// one return type.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(TS, Clone, PartialEq, Eq, Debug)]
 pub struct CallableSig {
+    #[ts(skip)] // FIXME: we do want the sig, circle back later
     params_and_return: Arc<[Ty]>,
     is_varargs: bool,
     safety: Safety,
@@ -305,7 +329,11 @@ impl CallableSig {
         safety: Safety,
     ) -> CallableSig {
         params.push(ret);
-        CallableSig { params_and_return: params.into(), is_varargs, safety }
+        CallableSig {
+            params_and_return: params.into(),
+            is_varargs,
+            safety,
+        }
     }
 
     pub fn from_fn_ptr(fn_ptr: &FnPointer) -> CallableSig {
@@ -332,7 +360,11 @@ impl CallableSig {
     pub fn to_fn_ptr(&self) -> FnPointer {
         FnPointer {
             num_binders: 0,
-            sig: FnSig { abi: (), safety: self.safety, variadic: self.is_varargs },
+            sig: FnSig {
+                abi: (),
+                safety: self.safety,
+                variadic: self.is_varargs,
+            },
             substitution: FnSubst(Substitution::from_iter(
                 Interner,
                 self.params_and_return.iter().cloned(),
@@ -428,7 +460,10 @@ pub(crate) fn fold_free_vars<T: HasInterner<Interner = Interner> + TypeFoldable<
             self.1(ty, bound_var, outer_binder)
         }
     }
-    t.fold_with(&mut FreeVarFolder(for_ty, for_const), DebruijnIndex::INNERMOST)
+    t.fold_with(
+        &mut FreeVarFolder(for_ty, for_const),
+        DebruijnIndex::INNERMOST,
+    )
 }
 
 pub(crate) fn fold_tys<T: HasInterner<Interner = Interner> + TypeFoldable<Interner>>(
@@ -593,7 +628,10 @@ where
         }
     }
     let mut error_replacer = ErrorReplacer { vars: 0 };
-    let value = match t.clone().try_fold_with(&mut error_replacer, DebruijnIndex::INNERMOST) {
+    let value = match t
+        .clone()
+        .try_fold_with(&mut error_replacer, DebruijnIndex::INNERMOST)
+    {
         Ok(t) => t,
         Err(_) => panic!("Encountered unbound or inference vars in {t:?}"),
     };
@@ -603,7 +641,10 @@ where
             chalk_ir::UniverseIndex::ROOT,
         )
     });
-    Canonical { value, binders: chalk_ir::CanonicalVarKinds::from_iter(Interner, kinds) }
+    Canonical {
+        value,
+        binders: chalk_ir::CanonicalVarKinds::from_iter(Interner, kinds),
+    }
 }
 
 pub fn callable_sig_from_fnonce(
@@ -617,7 +658,9 @@ pub fn callable_sig_from_fnonce(
     }
     let krate = env.krate;
     let fn_once_trait = FnTrait::FnOnce.get_id(db, krate)?;
-    let output_assoc_type = db.trait_data(fn_once_trait).associated_type_by_name(&name![Output])?;
+    let output_assoc_type = db
+        .trait_data(fn_once_trait)
+        .associated_type_by_name(&name![Output])?;
 
     let mut table = InferenceTable::new(db, env);
     let b = TyBuilder::trait_ref(db, fn_once_trait);
@@ -642,10 +685,19 @@ pub fn callable_sig_from_fnonce(
     let ret_ty = table.resolve_completely(ret_ty);
     let args_ty = table.resolve_completely(args_ty);
 
-    let params =
-        args_ty.as_tuple()?.iter(Interner).map(|it| it.assert_ty_ref(Interner)).cloned().collect();
+    let params = args_ty
+        .as_tuple()?
+        .iter(Interner)
+        .map(|it| it.assert_ty_ref(Interner))
+        .cloned()
+        .collect();
 
-    Some(CallableSig::from_params_and_return(params, ret_ty, false, Safety::Safe))
+    Some(CallableSig::from_params_and_return(
+        params,
+        ret_ty,
+        false,
+        Safety::Safe,
+    ))
 }
 
 struct PlaceholderCollector<'db> {
@@ -708,7 +760,10 @@ pub fn collect_placeholders<T>(value: &T, db: &dyn HirDatabase) -> Vec<TypeOrCon
 where
     T: ?Sized + TypeVisitable<Interner>,
 {
-    let mut collector = PlaceholderCollector { db, placeholders: FxHashSet::default() };
+    let mut collector = PlaceholderCollector {
+        db,
+        placeholders: FxHashSet::default(),
+    };
     value.visit_with(&mut collector, DebruijnIndex::INNERMOST);
     collector.placeholders.into_iter().collect()
 }

@@ -76,8 +76,10 @@ impl<'a> InferenceContext<'a> {
         }
         self.unify(&ty, expected);
 
-        let substs =
-            ty.as_adt().map(|(_, s)| s.clone()).unwrap_or_else(|| Substitution::empty(Interner));
+        let substs = ty
+            .as_adt()
+            .map(|(_, s)| s.clone())
+            .unwrap_or_else(|| Substitution::empty(Interner));
 
         let field_tys = def.map(|it| self.db.field_types(it)).unwrap_or_default();
         let (pre, post) = match ellipsis {
@@ -118,8 +120,10 @@ impl<'a> InferenceContext<'a> {
 
         self.unify(&ty, expected);
 
-        let substs =
-            ty.as_adt().map(|(_, s)| s.clone()).unwrap_or_else(|| Substitution::empty(Interner));
+        let substs = ty
+            .as_adt()
+            .map(|(_, s)| s.clone())
+            .unwrap_or_else(|| Substitution::empty(Interner));
 
         let field_tys = def.map(|it| self.db.field_types(it)).unwrap_or_default();
         let var_data = def.map(|it| it.variant_data(self.db.upcast()));
@@ -128,7 +132,9 @@ impl<'a> InferenceContext<'a> {
             let expected_ty = var_data
                 .as_ref()
                 .and_then(|it| it.field(&name))
-                .map_or(self.err_ty(), |f| field_tys[f].clone().substitute(Interner, &substs));
+                .map_or(self.err_ty(), |f| {
+                    field_tys[f].clone().substitute(Interner, &substs)
+                });
             let expected_ty = self.normalize_associated_types_in(expected_ty);
 
             T::infer(self, inner, &expected_ty, default_bm);
@@ -154,7 +160,10 @@ impl<'a> InferenceContext<'a> {
         };
 
         let ((pre, post), n_uncovered_patterns) = match ellipsis {
-            Some(idx) => (subs.split_at(idx), expectations.len().saturating_sub(subs.len())),
+            Some(idx) => (
+                subs.split_at(idx),
+                expectations.len().saturating_sub(subs.len()),
+            ),
             None => ((&subs[..], &[][..]), 0),
         };
         let mut expectations_iter = expectations
@@ -165,7 +174,11 @@ impl<'a> InferenceContext<'a> {
 
         let mut inner_tys = Vec::with_capacity(n_uncovered_patterns + subs.len());
 
-        inner_tys.extend(expectations_iter.by_ref().take(n_uncovered_patterns + subs.len()));
+        inner_tys.extend(
+            expectations_iter
+                .by_ref()
+                .take(n_uncovered_patterns + subs.len()),
+        );
 
         // Process pre
         for (ty, pat) in inner_tys.iter_mut().zip(pre) {
@@ -173,12 +186,19 @@ impl<'a> InferenceContext<'a> {
         }
 
         // Process post
-        for (ty, pat) in inner_tys.iter_mut().skip(pre.len() + n_uncovered_patterns).zip(post) {
+        for (ty, pat) in inner_tys
+            .iter_mut()
+            .skip(pre.len() + n_uncovered_patterns)
+            .zip(post)
+        {
             *ty = T::infer(self, *pat, ty, default_bm);
         }
 
-        TyKind::Tuple(inner_tys.len(), Substitution::from_iter(Interner, inner_tys))
-            .intern(Interner)
+        TyKind::Tuple(
+            inner_tys.len(),
+            Substitution::from_iter(Interner, inner_tys),
+        )
+        .intern(Interner)
     }
 
     pub(super) fn infer_top_pat(&mut self, pat: PatId, expected: &Ty) {
@@ -231,29 +251,39 @@ impl<'a> InferenceContext<'a> {
                 &expected,
                 default_bm,
             ),
-            Pat::TupleStruct { path: p, args: subpats, ellipsis } => self
-                .infer_tuple_struct_pat_like(
-                    p.as_deref(),
-                    &expected,
-                    default_bm,
-                    pat,
-                    *ellipsis,
-                    subpats,
-                ),
-            Pat::Record { path: p, args: fields, ellipsis: _ } => {
+            Pat::TupleStruct {
+                path: p,
+                args: subpats,
+                ellipsis,
+            } => self.infer_tuple_struct_pat_like(
+                p.as_deref(),
+                &expected,
+                default_bm,
+                pat,
+                *ellipsis,
+                subpats,
+            ),
+            Pat::Record {
+                path: p,
+                args: fields,
+                ellipsis: _,
+            } => {
                 let subs = fields.iter().map(|f| (f.name.clone(), f.pat));
                 self.infer_record_pat_like(p.as_deref(), &expected, default_bm, pat, subs)
             }
             Pat::Path(path) => {
                 // FIXME update resolver for the surrounding expression
-                self.infer_path(path, pat.into()).unwrap_or_else(|| self.err_ty())
+                self.infer_path(path, pat.into())
+                    .unwrap_or_else(|| self.err_ty())
             }
             Pat::Bind { id, subpat } => {
                 return self.infer_bind_pat(pat, *id, default_bm, *subpat, &expected);
             }
-            Pat::Slice { prefix, slice, suffix } => {
-                self.infer_slice_pat(&expected, prefix, slice, suffix, default_bm)
-            }
+            Pat::Slice {
+                prefix,
+                slice,
+                suffix,
+            } => self.infer_slice_pat(&expected, prefix, slice, suffix, default_bm),
             Pat::Wild => expected.clone(),
             Pat::Range { .. } => {
                 // FIXME: do some checks here.
@@ -270,7 +300,10 @@ impl<'a> InferenceContext<'a> {
                     let (inner_ty, alloc_ty) = match expected.as_adt() {
                         Some((adt, subst)) if adt == box_adt => (
                             subst.at(Interner, 0).assert_ty_ref(Interner).clone(),
-                            subst.as_slice(Interner).get(1).and_then(|a| a.ty(Interner).cloned()),
+                            subst
+                                .as_slice(Interner)
+                                .get(1)
+                                .and_then(|a| a.ty(Interner).cloned()),
                         ),
                         _ => (self.result.standard_types.unknown.clone(), None),
                     };
@@ -281,7 +314,8 @@ impl<'a> InferenceContext<'a> {
                     if let Some(alloc_ty) = alloc_ty {
                         b = b.push(alloc_ty);
                     }
-                    b.fill_with_defaults(self.db, || self.table.new_type_var()).build()
+                    b.fill_with_defaults(self.db, || self.table.new_type_var())
+                        .build()
                 }
                 None => self.err_ty(),
             },
@@ -294,9 +328,13 @@ impl<'a> InferenceContext<'a> {
         let ty = self.insert_type_vars_shallow(ty);
         // FIXME: This never check is odd, but required with out we do inference right now
         if !expected.is_never() && !self.unify(&ty, &expected) {
-            self.result
-                .type_mismatches
-                .insert(pat.into(), TypeMismatch { expected, actual: ty.clone() });
+            self.result.type_mismatches.insert(
+                pat.into(),
+                TypeMismatch {
+                    expected,
+                    actual: ty.clone(),
+                },
+            );
         }
         self.write_pat_ty(pat, ty);
         self.pat_ty_after_adjustment(pat)
@@ -389,7 +427,10 @@ impl<'a> InferenceContext<'a> {
                     let len = try_const_usize(self.db, length);
                     let len =
                         len.and_then(|len| len.checked_sub((prefix.len() + suffix.len()) as u128));
-                    TyKind::Array(elem_ty.clone(), usize_const(self.db, len, self.resolver.krate()))
+                    TyKind::Array(
+                        elem_ty.clone(),
+                        usize_const(self.db, len, self.resolver.krate()),
+                    )
                 }
                 _ => TyKind::Slice(elem_ty.clone()),
             }

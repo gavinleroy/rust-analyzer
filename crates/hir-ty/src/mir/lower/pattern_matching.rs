@@ -13,8 +13,13 @@ macro_rules! not_supported {
 }
 
 pub(super) enum AdtPatternShape<'a> {
-    Tuple { args: &'a [PatId], ellipsis: Option<usize> },
-    Record { args: &'a [RecordFieldPat] },
+    Tuple {
+        args: &'a [PatId],
+        ellipsis: Option<usize>,
+    },
+    Record {
+        args: &'a [RecordFieldPat],
+    },
     Unit,
 }
 
@@ -80,7 +85,12 @@ impl MirLowerCtx<'_> {
         pattern: PatId,
         mode: MatchingMode,
     ) -> Result<(BasicBlockId, Option<BasicBlockId>)> {
-        let cnt = self.infer.pat_adjustments.get(&pattern).map(|x| x.len()).unwrap_or_default();
+        let cnt = self
+            .infer
+            .pat_adjustments
+            .get(&pattern)
+            .map(|x| x.len())
+            .unwrap_or_default();
         cond_place.projection = cond_place
             .projection
             .iter()
@@ -171,8 +181,9 @@ impl MirLowerCtx<'_> {
                         self.lower_literal_or_const_to_operand(self.infer[pattern].clone(), l)?;
                     let else_target = *current_else.get_or_insert_with(|| self.new_basic_block());
                     let next = self.new_basic_block();
-                    let discr: Place =
-                        self.temp(TyBuilder::bool(), current, pattern.into())?.into();
+                    let discr: Place = self
+                        .temp(TyBuilder::bool(), current, pattern.into())?
+                        .into();
                     self.push_assignment(
                         current,
                         discr.clone(),
@@ -205,13 +216,18 @@ impl MirLowerCtx<'_> {
                 }
                 (current, current_else)
             }
-            Pat::Slice { prefix, slice, suffix } => {
+            Pat::Slice {
+                prefix,
+                slice,
+                suffix,
+            } => {
                 if mode == MatchingMode::Check {
                     // emit runtime length check for slice
                     if let TyKind::Slice(_) = self.infer[pattern].kind(Interner) {
                         let pattern_len = prefix.len() + suffix.len();
-                        let place_len: Place =
-                            self.temp(TyBuilder::usize(), current, pattern.into())?.into();
+                        let place_len: Place = self
+                            .temp(TyBuilder::usize(), current, pattern.into())?
+                            .into();
                         self.push_assignment(
                             current,
                             place_len.clone(),
@@ -240,8 +256,9 @@ impl MirLowerCtx<'_> {
                                 MemoryMap::default(),
                                 TyBuilder::usize(),
                             );
-                            let discr: Place =
-                                self.temp(TyBuilder::bool(), current, pattern.into())?.into();
+                            let discr: Place = self
+                                .temp(TyBuilder::bool(), current, pattern.into())?
+                                .into();
                             self.push_assignment(
                                 current,
                                 discr.clone(),
@@ -325,8 +342,9 @@ impl MirLowerCtx<'_> {
                         }
                         not_supported!("path in pattern position that is not const or variant")
                     };
-                    let tmp: Place =
-                        self.temp(self.infer[pattern].clone(), current, pattern.into())?.into();
+                    let tmp: Place = self
+                        .temp(self.infer[pattern].clone(), current, pattern.into())?
+                        .into();
                     let span = pattern.into();
                     self.lower_const(
                         c.into(),
@@ -336,7 +354,9 @@ impl MirLowerCtx<'_> {
                         span,
                         self.infer[pattern].clone(),
                     )?;
-                    let tmp2: Place = self.temp(TyBuilder::bool(), current, pattern.into())?.into();
+                    let tmp2: Place = self
+                        .temp(TyBuilder::bool(), current, pattern.into())?
+                        .into();
                     self.push_assignment(
                         current,
                         tmp2.clone(),
@@ -393,7 +413,11 @@ impl MirLowerCtx<'_> {
                     (current, current_else)
                 }
             }
-            Pat::TupleStruct { path: _, args, ellipsis } => {
+            Pat::TupleStruct {
+                path: _,
+                args,
+                ellipsis,
+            } => {
                 let Some(variant) = self.infer.variant_resolution_for_pat(pattern) else {
                     not_supported!("unresolved variant");
                 };
@@ -403,7 +427,10 @@ impl MirLowerCtx<'_> {
                     current,
                     pattern.into(),
                     current_else,
-                    AdtPatternShape::Tuple { args, ellipsis: *ellipsis },
+                    AdtPatternShape::Tuple {
+                        args,
+                        ellipsis: *ellipsis,
+                    },
                     mode,
                 )?
             }
@@ -436,9 +463,12 @@ impl MirLowerCtx<'_> {
             match mode {
                 BindingMode::Move => Operand::Copy(cond_place).into(),
                 BindingMode::Ref(Mutability::Not) => Rvalue::Ref(BorrowKind::Shared, cond_place),
-                BindingMode::Ref(Mutability::Mut) => {
-                    Rvalue::Ref(BorrowKind::Mut { allow_two_phase_borrow: false }, cond_place)
-                }
+                BindingMode::Ref(Mutability::Mut) => Rvalue::Ref(
+                    BorrowKind::Mut {
+                        allow_two_phase_borrow: false,
+                    },
+                    cond_place,
+                ),
             },
             span,
         );
@@ -455,7 +485,9 @@ impl MirLowerCtx<'_> {
     ) -> Result<(BasicBlockId, Option<BasicBlockId>)> {
         let then_target = self.new_basic_block();
         let else_target = current_else.unwrap_or_else(|| self.new_basic_block());
-        let discr: Place = self.temp(TyBuilder::bool(), current, pattern.into())?.into();
+        let discr: Place = self
+            .temp(TyBuilder::bool(), current, pattern.into())?
+            .into();
         self.push_assignment(
             current,
             discr.clone(),
@@ -551,10 +583,14 @@ impl MirLowerCtx<'_> {
                 let it = args
                     .iter()
                     .map(|x| {
-                        let field_id =
-                            variant_data.field(&x.name).ok_or(MirLowerError::UnresolvedField)?;
+                        let field_id = variant_data
+                            .field(&x.name)
+                            .ok_or(MirLowerError::UnresolvedField)?;
                         Ok((
-                            PlaceElem::Field(FieldId { parent: v.into(), local_id: field_id }),
+                            PlaceElem::Field(FieldId {
+                                parent: v.into(),
+                                local_id: field_id,
+                            }),
                             x.pat,
                         ))
                     })
@@ -562,10 +598,12 @@ impl MirLowerCtx<'_> {
                 self.pattern_match_adt(current, current_else, it.into_iter(), cond_place, mode)?
             }
             AdtPatternShape::Tuple { args, ellipsis } => {
-                let fields = variant_data
-                    .fields()
-                    .iter()
-                    .map(|(x, _)| PlaceElem::Field(FieldId { parent: v.into(), local_id: x }));
+                let fields = variant_data.fields().iter().map(|(x, _)| {
+                    PlaceElem::Field(FieldId {
+                        parent: v.into(),
+                        local_id: x,
+                    })
+                });
                 self.pattern_match_tuple_like(
                     current,
                     current_else,

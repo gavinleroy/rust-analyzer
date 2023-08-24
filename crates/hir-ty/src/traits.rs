@@ -1,10 +1,11 @@
 //! Trait solving using Chalk.
 
 use std::env::var;
+use std::hash::Hash;
 
 use chalk_ir::{fold::TypeFoldable, DebruijnIndex, GoalData};
-use chalk_recursive::Cache;
-use chalk_solve::{logging_db::LoggingRustIrDatabase, rust_ir, Solver};
+use chalk_recursive::{self, Cache};
+use chalk_solve::{logging_db::LoggingRustIrDatabase, rust_ir};
 
 use base_db::CrateId;
 use hir_def::{
@@ -14,6 +15,11 @@ use hir_def::{
 use hir_expand::name::{name, Name};
 use stdx::panic_context;
 use triomphe::Arc;
+
+use argus::{
+    proof_tree::{ProofTree, TracedFallible},
+    utils::{GraphVizExt, SexpExt},
+};
 
 use crate::{
     db::HirDatabase, infer::unify::InferenceTable, utils::UnevaluatedConstEvaluatorFolder, AliasEq,
@@ -32,9 +38,14 @@ pub(crate) struct ChalkContext<'a> {
 }
 
 fn create_chalk_solver() -> chalk_recursive::RecursiveSolver<Interner> {
-    let overflow_depth =
-        var("CHALK_OVERFLOW_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(500);
-    let max_size = var("CHALK_SOLVER_MAX_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(150);
+    let overflow_depth = var("CHALK_OVERFLOW_DEPTH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(500);
+    let max_size = var("CHALK_SOLVER_MAX_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(150);
     chalk_recursive::RecursiveSolver::new(overflow_depth, max_size, Some(Cache::new()))
 }
 
@@ -80,42 +91,79 @@ pub(crate) fn normalize_projection_query(
 }
 
 /// Solve a trait goal using Chalk.
+#[tracing::instrument(skip(db, krate, block))]
 pub(crate) fn trait_solve_query(
     db: &dyn HirDatabase,
     krate: CrateId,
     block: Option<BlockId>,
     goal: Canonical<InEnvironment<Goal>>,
-) -> Option<Solution> {
-    let _p = profile::span("trait_solve_query").detail(|| match &goal.value.goal.data(Interner) {
-        GoalData::DomainGoal(DomainGoal::Holds(WhereClause::Implemented(it))) => {
-            db.trait_data(it.hir_trait_id()).name.display(db.upcast()).to_string()
+) -> (Option<crate::Solution>, crate::ProofTree) {
+    let internal_solve = || {
+        let context = ChalkContext { db, krate, block };
+        let return_traced = |solution, trace: crate::ProofTree| {
+            if is_trace_graphviz() {
+                trace
+                    .output_dot(&context)
+                    .expect("failed to output traced dot graph");
+            }
+
+            (solution, trace)
+        };
+
+        let _p =
+            profile::span("trait_solve_query").detail(|| match &goal.value.goal.data(Interner) {
+                GoalData::DomainGoal(DomainGoal::Holds(WhereClause::Implemented(it))) => db
+                    .trait_data(it.hir_trait_id())
+                    .name
+                    .display(db.upcast())
+                    .to_string(),
+                GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(_))) => {
+                    "alias_eq".to_string()
+                }
+                _ => "??".to_string(),
+            });
+
+        if let GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(AliasEq {
+            alias: AliasTy::Projection(projection_ty),
+            ..
+        }))) = &goal.value.goal.data(Interner)
+        {
+            // FIXME(gavinleroy): is it unsound to comment this out, or will it just burn cycles?
+            // if let TyKind::BoundVar(_) = projection_ty.self_type_parameter(db).kind(Interner) {
+            //     // Hack: don't ask Chalk to normalize with an unknown self type, it'll say that's impossible
+            //     return return_traced(
+            //         Some(Solution::Ambig(Guidance::Unknown)),
+            //         ProofTree::unknown(),
+            //     );
+            // }
         }
-        GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(_))) => "alias_eq".to_string(),
-        _ => "??".to_string(),
-    });
-    tracing::info!("trait_solve_query({:?})", goal.value.goal);
 
-    if let GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(AliasEq {
-        alias: AliasTy::Projection(projection_ty),
-        ..
-    }))) = &goal.value.goal.data(Interner)
-    {
-        if let TyKind::BoundVar(_) = projection_ty.self_type_parameter(db).kind(Interner) {
-            // Hack: don't ask Chalk to normalize with an unknown self type, it'll say that's impossible
-            return Some(Solution::Ambig(Guidance::Unknown));
-        }
-    }
+        // Chalk see `UnevaluatedConst` as a unique concrete value, but we see it as an alias for another const. So
+        // we should get rid of it when talking to chalk.
+        let goal = goal
+            .clone()
+            .try_fold_with(
+                &mut UnevaluatedConstEvaluatorFolder { db },
+                DebruijnIndex::INNERMOST,
+            )
+            .unwrap();
 
-    // Chalk see `UnevaluatedConst` as a unique concrete value, but we see it as an alias for another const. So
-    // we should get rid of it when talking to chalk.
-    let goal = goal
-        .try_fold_with(&mut UnevaluatedConstEvaluatorFolder { db }, DebruijnIndex::INNERMOST)
-        .unwrap();
+        // We currently don't deal with universes (I think / hope they're not yet
+        // relevant for our use cases?)
+        let u_canonical = chalk_ir::UCanonical {
+            canonical: goal,
+            universes: 1,
+        };
 
-    // We currently don't deal with universes (I think / hope they're not yet
-    // relevant for our use cases?)
-    let u_canonical = chalk_ir::UCanonical { canonical: goal, universes: 1 };
-    solve(db, krate, block, &u_canonical)
+        let (sol, t) = solve(db, krate, block, &u_canonical);
+        return_traced(sol, t)
+    };
+
+    internal_solve()
+
+    // crate::db::push_trace(traced_query.clone());
+
+    // (traced_query.solution, traced_query.trace)
 }
 
 fn solve(
@@ -123,7 +171,7 @@ fn solve(
     krate: CrateId,
     block: Option<BlockId>,
     goal: &chalk_ir::UCanonical<chalk_ir::InEnvironment<chalk_ir::Goal<Interner>>>,
-) -> Option<chalk_solve::Solution<Interner>> {
+) -> (Option<crate::Solution>, crate::ProofTree) {
     let context = ChalkContext { db, krate, block };
     tracing::debug!("solve goal: {:?}", goal);
     let mut solver = create_chalk_solver();
@@ -146,21 +194,23 @@ fn solve(
         } else {
             None
         };
-        let solution = if is_chalk_print() {
+        let TracedFallible {
+            solution, trace, ..
+        } = if is_chalk_print() {
             let logging_db =
                 LoggingRustIrDatabaseLoggingOnDrop(LoggingRustIrDatabase::new(context));
-            solver.solve_limited(&logging_db.0, goal, &should_continue)
+            // XXX: Dump the graphviz version of the proof tree
+            solver.solve_traced(&logging_db.0, goal, &should_continue)
         } else {
-            solver.solve_limited(&context, goal, &should_continue)
+            solver.solve_traced(&context, goal, &should_continue)
         };
 
-        tracing::debug!("solve({:?}) => {:?}", goal, solution);
-
-        solution
+        (solution.ok(), solver.consume_tree(trace))
     };
 
     // don't set the TLS for Chalk unless Chalk debugging is active, to make
     // extra sure we only use it for debugging
+    // crate::tls::set_current_program(db, || chalk_solve::logging::with_tracing_logs(solve))
     if is_chalk_debug() {
         crate::tls::set_current_program(db, solve)
     } else {
@@ -182,6 +232,10 @@ fn is_chalk_debug() -> bool {
 
 fn is_chalk_print() -> bool {
     std::env::var("CHALK_PRINT").is_ok()
+}
+
+fn is_trace_graphviz() -> bool {
+    std::env::var("TRACE_GRAPH").is_ok()
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

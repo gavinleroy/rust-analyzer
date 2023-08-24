@@ -141,7 +141,9 @@ impl IntRange {
         let (lo, hi) = self.boundaries();
         let (other_lo, other_hi) = other.boundaries();
         if lo <= other_hi && other_lo <= hi {
-            Some(IntRange { range: max(lo, other_lo)..=min(hi, other_hi) })
+            Some(IntRange {
+                range: max(lo, other_lo)..=min(hi, other_hi),
+            })
         } else {
             None
         }
@@ -159,7 +161,10 @@ impl IntRange {
                         PatKind::Wild
                     }
                 };
-                Pat { ty, kind: kind.into() }
+                Pat {
+                    ty,
+                    kind: kind.into(),
+                }
             }
             _ => unimplemented!(),
         }
@@ -214,7 +219,10 @@ struct SplitIntRange {
 
 impl SplitIntRange {
     fn new(range: IntRange) -> Self {
-        SplitIntRange { range, borders: Vec::new() }
+        SplitIntRange {
+            range,
+            borders: Vec::new(),
+        }
     }
 
     /// Internal use
@@ -323,7 +331,9 @@ pub(super) enum Constructor {
     /// Stands for constructors that are not seen in the matrix, as explained in the documentation
     /// for [`SplitWildcard`]. The carried `bool` is used for the `non_exhaustive_omitted_patterns`
     /// lint.
-    Missing { nonexhaustive_enum_missing_real_variants: bool },
+    Missing {
+        nonexhaustive_enum_missing_real_variants: bool,
+    },
     /// Wildcard pattern.
     Wildcard,
     /// Or-pattern.
@@ -478,7 +488,11 @@ impl Constructor {
             (NonExhaustive, _) => false,
 
             _ => {
-                never!("trying to compare incompatible constructors {:?} and {:?}", self, other);
+                never!(
+                    "trying to compare incompatible constructors {:?} and {:?}",
+                    self,
+                    other
+                );
                 // Continue with 'whatever is covered' supposed to result in false no-error diagnostic.
                 true
             }
@@ -594,7 +608,10 @@ impl SplitWildcard {
                 let mut ctors: SmallVec<[_; 1]> = enum_data
                     .variants
                     .iter()
-                    .map(|(local_id, _)| EnumVariantId { parent: *enum_id, local_id })
+                    .map(|(local_id, _)| EnumVariantId {
+                        parent: *enum_id,
+                        local_id,
+                    })
                     .filter(|&variant| {
                         // If `exhaustive_patterns` is enabled, we exclude variants known to be
                         // uninhabited.
@@ -622,7 +639,10 @@ impl SplitWildcard {
             _ => smallvec![NonExhaustive],
         };
 
-        SplitWildcard { matrix_ctors: Vec::new(), all_ctors }
+        SplitWildcard {
+            matrix_ctors: Vec::new(),
+            all_ctors,
+        }
     }
 
     /// Pass a set of constructors relative to which to split this one. Don't call twice, it won't
@@ -633,8 +653,11 @@ impl SplitWildcard {
         ctors: impl Iterator<Item = &'a Constructor> + Clone,
     ) {
         // Since `all_ctors` never contains wildcards, this won't recurse further.
-        self.all_ctors =
-            self.all_ctors.iter().flat_map(|ctor| ctor.split(pcx, ctors.clone())).collect();
+        self.all_ctors = self
+            .all_ctors
+            .iter()
+            .flat_map(|ctor| ctor.split(pcx, ctors.clone()))
+            .collect();
         self.matrix_ctors = ctors.filter(|c| !c.is_wildcard()).cloned().collect();
     }
 
@@ -648,7 +671,9 @@ impl SplitWildcard {
         &'a self,
         pcx: PatCtxt<'a, 'p>,
     ) -> impl Iterator<Item = &'a Constructor> + Captures<'p> {
-        self.all_ctors.iter().filter(move |ctor| !ctor.is_covered_by_any(pcx, &self.matrix_ctors))
+        self.all_ctors
+            .iter()
+            .filter(move |ctor| !ctor.is_covered_by_any(pcx, &self.matrix_ctors))
     }
 
     /// Return the set of constructors resulting from splitting the wildcard. As explained at the
@@ -691,7 +716,9 @@ impl SplitWildcard {
                             .any(|c| !(c.is_non_exhaustive() || c.is_unstable_variant(pcx))),
                     }
                 } else {
-                    Missing { nonexhaustive_enum_missing_real_variants: false }
+                    Missing {
+                        nonexhaustive_enum_missing_real_variants: false,
+                    }
                 }
             } else {
                 Wildcard
@@ -737,7 +764,9 @@ impl<'p> Fields<'p> {
 
     fn singleton(cx: &MatchCheckCtx<'_, 'p>, field: DeconstructedPat<'p>) -> Self {
         let field = cx.pattern_arena.alloc(field);
-        Fields { fields: std::slice::from_ref(field) }
+        Fields {
+            fields: std::slice::from_ref(field),
+        }
     }
 
     pub(super) fn from_iter(
@@ -770,19 +799,21 @@ impl<'p> Fields<'p> {
         let field_ty = cx.db.field_types(variant);
         let fields_len = variant.variant_data(cx.db.upcast()).fields().len() as u32;
 
-        (0..fields_len).map(|idx| LocalFieldId::from_raw(idx.into())).filter_map(move |fid| {
-            let ty = field_ty[fid].clone().substitute(Interner, substs);
-            let ty = normalize(cx.db, cx.db.trait_environment_for_body(cx.body), ty);
-            let is_visible = matches!(adt, hir_def::AdtId::EnumId(..))
-                || visibility[fid].is_visible_from(cx.db.upcast(), cx.module);
-            let is_uninhabited = cx.is_uninhabited(&ty);
+        (0..fields_len)
+            .map(|idx| LocalFieldId::from_raw(idx.into()))
+            .filter_map(move |fid| {
+                let ty = field_ty[fid].clone().substitute(Interner, substs);
+                let ty = normalize(cx.db, cx.db.trait_environment_for_body(cx.body), ty);
+                let is_visible = matches!(adt, hir_def::AdtId::EnumId(..))
+                    || visibility[fid].is_visible_from(cx.db.upcast(), cx.module);
+                let is_uninhabited = cx.is_uninhabited(&ty);
 
-            if is_uninhabited && (!is_visible || is_non_exhaustive) {
-                None
-            } else {
-                Some((fid, ty))
-            }
-        })
+                if is_uninhabited && (!is_visible || is_non_exhaustive) {
+                    None
+                } else {
+                    Some((fid, ty))
+                }
+            })
     }
 
     /// Creates a new list of wildcard fields for a given constructor. The result must have a
@@ -859,7 +890,12 @@ impl<'p> DeconstructedPat<'p> {
     }
 
     pub(super) fn new(ctor: Constructor, fields: Fields<'p>, ty: Ty) -> Self {
-        DeconstructedPat { ctor, fields, ty, reachable: Cell::new(false) }
+        DeconstructedPat {
+            ctor,
+            fields,
+            ty,
+            reachable: Cell::new(false),
+        }
     }
 
     /// Construct a pattern that matches everything that starts with this constructor.
@@ -881,8 +917,14 @@ impl<'p> DeconstructedPat<'p> {
         let ctor;
         let fields;
         match pat.kind.as_ref() {
-            PatKind::Binding { subpattern: Some(subpat), .. } => return mkpat(subpat),
-            PatKind::Binding { subpattern: None, .. } | PatKind::Wild => {
+            PatKind::Binding {
+                subpattern: Some(subpat),
+                ..
+            } => return mkpat(subpat),
+            PatKind::Binding {
+                subpattern: None, ..
+            }
+            | PatKind::Wild => {
                 ctor = Wildcard;
                 fields = Fields::empty();
             }
@@ -918,8 +960,9 @@ impl<'p> DeconstructedPat<'p> {
                         // normally or through box-patterns. We'll have to figure out a proper
                         // solution when we introduce generalized deref patterns. Also need to
                         // prevent mixing of those two options.
-                        let pat =
-                            subpatterns.iter().find(|pat| pat.field.into_raw() == 0u32.into());
+                        let pat = subpatterns
+                            .iter()
+                            .find(|pat| pat.field.into_raw() == 0u32.into());
                         let field = if let Some(pat) = pat {
                             mkpat(&pat.pattern)
                         } else {
@@ -960,7 +1003,11 @@ impl<'p> DeconstructedPat<'p> {
                         fields = Fields::from_iter(cx, wilds);
                     }
                     _ => {
-                        never!("pattern has unexpected type: pat: {:?}, ty: {:?}", pat, &pat.ty);
+                        never!(
+                            "pattern has unexpected type: pat: {:?}, ty: {:?}",
+                            pat,
+                            &pat.ty
+                        );
                         ctor = Wildcard;
                         fields = Fields::empty();
                     }
@@ -996,7 +1043,9 @@ impl<'p> DeconstructedPat<'p> {
                     // Without `box_patterns`, the only legal pattern of type `Box` is `_` (outside
                     // of `std`). So this branch is only reachable when the feature is enabled and
                     // the pattern is a box pattern.
-                    PatKind::Deref { subpattern: subpatterns.next().unwrap() }
+                    PatKind::Deref {
+                        subpattern: subpatterns.next().unwrap(),
+                    }
                 }
                 TyKind::Adt(adt, substs) => {
                     let variant = self.ctor.variant_id_for_adt(adt.0);
@@ -1006,7 +1055,11 @@ impl<'p> DeconstructedPat<'p> {
                         .collect();
 
                     if let VariantId::EnumVariantId(enum_variant) = variant {
-                        PatKind::Variant { substs: substs.clone(), enum_variant, subpatterns }
+                        PatKind::Variant {
+                            substs: substs.clone(),
+                            enum_variant,
+                            subpatterns,
+                        }
                     } else {
                         PatKind::Leaf { subpatterns }
                     }
@@ -1015,7 +1068,9 @@ impl<'p> DeconstructedPat<'p> {
                 // be careful to reconstruct the correct constant pattern here. However a string
                 // literal pattern will never be reported as a non-exhaustiveness witness, so we
                 // ignore this issue.
-                TyKind::Ref(..) => PatKind::Deref { subpattern: subpatterns.next().unwrap() },
+                TyKind::Ref(..) => PatKind::Deref {
+                    subpattern: subpatterns.next().unwrap(),
+                },
                 _ => {
                     never!("unexpected ctor for type {:?} {:?}", self.ctor, self.ty);
                     PatKind::Wild
@@ -1038,7 +1093,10 @@ impl<'p> DeconstructedPat<'p> {
                 PatKind::Wild
             }
         };
-        Pat { ty: self.ty.clone(), kind: Box::new(pat) }
+        Pat {
+            ty: self.ty.clone(),
+            kind: Box::new(pat),
+        }
     }
 
     pub(super) fn is_or_pat(&self) -> bool {
@@ -1067,7 +1125,9 @@ impl<'p> DeconstructedPat<'p> {
         match (&self.ctor, other_ctor) {
             (Wildcard, _) => {
                 // We return a wildcard for each field of `other_ctor`.
-                Fields::wildcards(cx, &self.ty, other_ctor).iter_patterns().collect()
+                Fields::wildcards(cx, &self.ty, other_ctor)
+                    .iter_patterns()
+                    .collect()
             }
             (Slice(self_slice), Slice(other_slice))
                 if self_slice.arity() != other_slice.arity() =>

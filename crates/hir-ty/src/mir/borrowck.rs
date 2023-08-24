@@ -241,8 +241,11 @@ fn place_case(db: &dyn HirDatabase, body: &MirBody, lvalue: &Place) -> Projectio
 /// the start of the block. Only `StorageDead` can remove something from this map, and we ignore
 /// `Uninit` and `drop` and similar after initialization.
 fn ever_initialized_map(body: &MirBody) -> ArenaMap<BasicBlockId, ArenaMap<LocalId, bool>> {
-    let mut result: ArenaMap<BasicBlockId, ArenaMap<LocalId, bool>> =
-        body.basic_blocks.iter().map(|x| (x.0, ArenaMap::default())).collect();
+    let mut result: ArenaMap<BasicBlockId, ArenaMap<LocalId, bool>> = body
+        .basic_blocks
+        .iter()
+        .map(|x| (x.0, ArenaMap::default()))
+        .collect();
     fn dfs(
         body: &MirBody,
         b: BasicBlockId,
@@ -277,15 +280,30 @@ fn ever_initialized_map(body: &MirBody) -> ArenaMap<BasicBlockId, ArenaMap<Local
             | TerminatorKind::Abort
             | TerminatorKind::Return
             | TerminatorKind::Unreachable => vec![],
-            TerminatorKind::Call { target, cleanup, destination, .. } => {
+            TerminatorKind::Call {
+                target,
+                cleanup,
+                destination,
+                ..
+            } => {
                 if destination.projection.len() == 0 && destination.local == l {
                     is_ever_initialized = true;
                 }
-                target.into_iter().chain(cleanup.into_iter()).copied().collect()
+                target
+                    .into_iter()
+                    .chain(cleanup.into_iter())
+                    .copied()
+                    .collect()
             }
-            TerminatorKind::Drop { target, unwind, place: _ } => {
-                Some(target).into_iter().chain(unwind.into_iter()).copied().collect()
-            }
+            TerminatorKind::Drop {
+                target,
+                unwind,
+                place: _,
+            } => Some(target)
+                .into_iter()
+                .chain(unwind.into_iter())
+                .copied()
+                .collect(),
             TerminatorKind::DropAndReplace { .. }
             | TerminatorKind::Assert { .. }
             | TerminatorKind::Yield { .. }
@@ -320,8 +338,11 @@ fn mutability_of_locals(
     db: &dyn HirDatabase,
     body: &MirBody,
 ) -> ArenaMap<LocalId, MutabilityReason> {
-    let mut result: ArenaMap<LocalId, MutabilityReason> =
-        body.locals.iter().map(|x| (x.0, MutabilityReason::Not)).collect();
+    let mut result: ArenaMap<LocalId, MutabilityReason> = body
+        .locals
+        .iter()
+        .map(|x| (x.0, MutabilityReason::Not))
+        .collect();
     let mut push_mut_span = |local, span| match &mut result[local] {
         MutabilityReason::Mut { spans } => spans.push(span),
         x @ MutabilityReason::Not => *x = MutabilityReason::Mut { spans: vec![span] },
@@ -378,7 +399,11 @@ fn mutability_of_locals(
             | TerminatorKind::Yield { .. } => (),
             TerminatorKind::Call { destination, .. } => {
                 if destination.projection.len() == 0 {
-                    if ever_init_map.get(destination.local).copied().unwrap_or_default() {
+                    if ever_init_map
+                        .get(destination.local)
+                        .copied()
+                        .unwrap_or_default()
+                    {
                         push_mut_span(destination.local, MirSpan::Unknown);
                     } else {
                         ever_init_map.insert(destination.local, true);

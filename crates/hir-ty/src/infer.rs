@@ -57,13 +57,34 @@ pub use unify::could_unify;
 
 pub(crate) use self::closure::{CaptureKind, CapturedItem, CapturedItemWithoutTy};
 
-pub(crate) mod unify;
-mod path;
-mod expr;
-mod pat;
-mod coerce;
 pub(crate) mod closure;
+mod coerce;
+mod expr;
 mod mutability;
+mod pat;
+mod path;
+pub(crate) mod unify;
+
+#[derive(Clone, Debug)]
+pub(crate) struct QueryAttempt<'a> {
+    pub context: unify::InferenceTable<'a>,
+    pub canonicalized: crate::Canonical<crate::InEnvironment<crate::Goal>>,
+    pub solution: Option<crate::Solution>,
+    pub trace: crate::ProofTree,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum AttemptKind<'a> {
+    Required(Vec<QueryAttempt<'a>>),
+    Try(QueryAttempt<'a>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TracedTraitQuery<'a> {
+    pub krate: base_db::CrateId,
+    pub block: Option<hir_def::BlockId>,
+    pub kind: AttemptKind<'a>,
+}
 
 /// The entry point of type inference.
 pub(crate) fn infer_query(db: &dyn HirDatabase, def: DefWithBodyId) -> Arc<InferenceResult> {
@@ -121,7 +142,10 @@ pub(crate) fn normalize(db: &dyn HirDatabase, trait_env: Arc<TraitEnvironment>, 
     // FIXME: TypeFlags::HAS_CT_PROJECTION is not implemented in chalk, so TypeFlags::HAS_PROJECTION only
     // works for the type case, so we check array unconditionally. Remove the array part
     // when the bug in chalk becomes fixed.
-    if !ty.data(Interner).flags.intersects(TypeFlags::HAS_PROJECTION)
+    if !ty
+        .data(Interner)
+        .flags
+        .intersects(TypeFlags::HAS_PROJECTION)
         && !matches!(ty.kind(Interner), TyKind::Array(..))
     {
         return ty;
@@ -166,7 +190,10 @@ pub(crate) struct InferOk<T> {
 
 impl<T> InferOk<T> {
     fn map<U>(self, f: impl FnOnce(T) -> U) -> InferOk<U> {
-        InferOk { value: f(self.value), goals: self.goals }
+        InferOk {
+            value: f(self.value),
+            goals: self.goals,
+        }
     }
 }
 
@@ -295,7 +322,10 @@ pub struct Adjustment {
 impl Adjustment {
     pub fn borrow(m: Mutability, ty: Ty) -> Self {
         let ty = TyKind::Ref(m, static_lifetime(), ty).intern(Interner);
-        Adjustment { kind: Adjust::Borrow(AutoBorrow::Ref(m)), target: ty }
+        Adjustment {
+            kind: Adjust::Borrow(AutoBorrow::Ref(m)),
+            target: ty,
+        }
     }
 }
 
@@ -392,7 +422,7 @@ pub struct InferenceResult {
     pub type_of_rpit: ArenaMap<RpitId, Ty>,
     /// Type of the result of `.into_iter()` on the for. `ExprId` is the one of the whole for loop.
     pub type_of_for_iterator: FxHashMap<ExprId, Ty>,
-    type_mismatches: FxHashMap<ExprOrPatId, TypeMismatch>,
+    pub type_mismatches: FxHashMap<ExprOrPatId, TypeMismatch>,
     /// Interned common types to return references to.
     standard_types: InternedStandardTypes,
     /// Stores the types which were implicitly dereferenced in pattern binding modes.
@@ -402,6 +432,9 @@ pub struct InferenceResult {
     pub(crate) closure_info: FxHashMap<ClosureId, (Vec<CapturedItem>, FnTrait)>,
     // FIXME: remove this field
     pub mutated_bindings_in_closure: FxHashSet<BindingId>,
+
+    /// The serializable traces that occurred within this body.
+    pub proof_trees: Vec<crate::proof_tree::SerializeTree>,
 }
 
 impl InferenceResult {
@@ -430,13 +463,17 @@ impl InferenceResult {
         self.type_mismatches.get(&pat.into())
     }
     pub fn type_mismatches(&self) -> impl Iterator<Item = (ExprOrPatId, &TypeMismatch)> {
-        self.type_mismatches.iter().map(|(expr_or_pat, mismatch)| (*expr_or_pat, mismatch))
+        self.type_mismatches
+            .iter()
+            .map(|(expr_or_pat, mismatch)| (*expr_or_pat, mismatch))
     }
     pub fn expr_type_mismatches(&self) -> impl Iterator<Item = (ExprId, &TypeMismatch)> {
-        self.type_mismatches.iter().filter_map(|(expr_or_pat, mismatch)| match *expr_or_pat {
-            ExprOrPatId::ExprId(expr) => Some((expr, mismatch)),
-            _ => None,
-        })
+        self.type_mismatches
+            .iter()
+            .filter_map(|(expr_or_pat, mismatch)| match *expr_or_pat {
+                ExprOrPatId::ExprId(expr) => Some((expr, mismatch)),
+                _ => None,
+            })
     }
     pub fn closure_info(&self, closure: &ClosureId) -> &(Vec<CapturedItem>, FnTrait) {
         self.closure_info.get(closure).unwrap()
@@ -447,7 +484,9 @@ impl Index<ExprId> for InferenceResult {
     type Output = Ty;
 
     fn index(&self, expr: ExprId) -> &Ty {
-        self.type_of_expr.get(expr).unwrap_or(&self.standard_types.unknown)
+        self.type_of_expr
+            .get(expr)
+            .unwrap_or(&self.standard_types.unknown)
     }
 }
 
@@ -455,7 +494,9 @@ impl Index<PatId> for InferenceResult {
     type Output = Ty;
 
     fn index(&self, pat: PatId) -> &Ty {
-        self.type_of_pat.get(pat).unwrap_or(&self.standard_types.unknown)
+        self.type_of_pat
+            .get(pat)
+            .unwrap_or(&self.standard_types.unknown)
     }
 }
 
@@ -463,7 +504,9 @@ impl Index<BindingId> for InferenceResult {
     type Output = Ty;
 
     fn index(&self, b: BindingId) -> &Ty {
-        self.type_of_binding.get(b).unwrap_or(&self.standard_types.unknown)
+        self.type_of_binding
+            .get(b)
+            .unwrap_or(&self.standard_types.unknown)
     }
 }
 
@@ -579,7 +622,11 @@ impl<'a> InferenceContext<'a> {
     // used this function for another workaround, mention it here. If you really need this function and believe that
     // there is no problem in it being `pub(crate)`, remove this comment.
     pub(crate) fn resolve_all(self) -> InferenceResult {
-        let InferenceContext { mut table, mut result, .. } = self;
+        let InferenceContext {
+            mut table,
+            mut result,
+            ..
+        } = self;
         // Destructure every single field so whenever new fields are added to `InferenceResult` we
         // don't forget to handle them here.
         let InferenceResult {
@@ -603,6 +650,7 @@ impl<'a> InferenceContext<'a> {
             // to resolve them here.
             closure_info: _,
             mutated_bindings_in_closure: _,
+            proof_trees,
         } = &mut result;
 
         table.fallback_if_possible();
@@ -643,7 +691,11 @@ impl<'a> InferenceContext<'a> {
                         return false;
                     }
 
-                    if let UnresolvedMethodCall { field_with_same_name, .. } = diagnostic {
+                    if let UnresolvedMethodCall {
+                        field_with_same_name,
+                        ..
+                    } = diagnostic
+                    {
                         if let Some(ty) = field_with_same_name {
                             *ty = table.resolve_completely(ty.clone());
                             if ty.contains_unknown() {
@@ -671,6 +723,34 @@ impl<'a> InferenceContext<'a> {
         for adjustment in pat_adjustments.values_mut().flatten() {
             *adjustment = table.resolve_completely(adjustment.clone());
         }
+
+        // Register all single attempts, there are not required obligations.
+        proof_trees.extend(
+            table
+                .tracked_obligations
+                .other
+                .into_iter()
+                .map(|attempt| attempt.into()),
+        );
+
+        // Register all required obligations, this shows how they evolved over time.
+        proof_trees.extend(
+            table
+                .tracked_obligations
+                .tracked
+                .into_iter_enumerated()
+                .map(|(key, attempts)| {
+                    let (krate, block) = table.tracked_obligations.info[&key];
+
+                    TracedTraitQuery {
+                        krate,
+                        block,
+                        kind: AttemptKind::Required(attempts),
+                    }
+                    .into()
+                }),
+        );
+
         result
     }
 
@@ -686,8 +766,11 @@ impl<'a> InferenceContext<'a> {
         let data = self.db.function_data(func);
         let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver)
             .with_impl_trait_mode(ImplTraitLoweringMode::Param);
-        let mut param_tys =
-            data.params.iter().map(|type_ref| ctx.lower_ty(type_ref)).collect::<Vec<_>>();
+        let mut param_tys = data
+            .params
+            .iter()
+            .map(|type_ref| ctx.lower_ty(type_ref))
+            .collect::<Vec<_>>();
         // Check if function contains a va_list, if it does then we append it to the parameter types
         // that are collected from the function data
         if data.is_varargs() {
@@ -734,6 +817,7 @@ impl<'a> InferenceContext<'a> {
         self.return_coercion = Some(CoerceMany::new(self.return_ty.clone()));
     }
 
+    #[tracing::instrument(skip(self))]
     fn insert_inference_vars_for_rpit<T>(
         &mut self,
         t: T,
@@ -759,10 +843,12 @@ impl<'a> InferenceContext<'a> {
                 let var = self.table.new_type_var();
                 let var_subst = Substitution::from1(Interner, var.clone());
                 for bound in bounds {
-                    let predicate =
-                        bound.map(|it| it.cloned()).substitute(Interner, &fn_placeholders);
-                    let (var_predicate, binders) =
-                        predicate.substitute(Interner, &var_subst).into_value_and_skipped_binders();
+                    let predicate = bound
+                        .map(|it| it.cloned())
+                        .substitute(Interner, &fn_placeholders);
+                    let (var_predicate, binders) = predicate
+                        .substitute(Interner, &var_subst)
+                        .into_value_and_skipped_binders();
                     always!(binders.is_empty(Interner)); // quantified where clauses not yet handled
                     let var_predicate = self.insert_inference_vars_for_rpit(
                         var_predicate,
@@ -778,6 +864,7 @@ impl<'a> InferenceContext<'a> {
         )
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn infer_body(&mut self) {
         match self.return_coercion {
             Some(_) => self.infer_return(self.body.body_expr),
@@ -880,7 +967,13 @@ impl<'a> InferenceContext<'a> {
             }
             match ty.kind(Interner) {
                 TyKind::Adt(chalk_ir::AdtId(hir_def::AdtId::StructId(struct_id)), substs) => {
-                    match self.db.field_types((*struct_id).into()).values().next_back().cloned() {
+                    match self
+                        .db
+                        .field_types((*struct_id).into())
+                        .values()
+                        .next_back()
+                        .cloned()
+                    {
                         Some(field) => {
                             ty = field.substitute(Interner, substs);
                         }
@@ -918,6 +1011,7 @@ impl<'a> InferenceContext<'a> {
     /// type annotation (e.g. from a let type annotation, field type or function
     /// call). `make_ty` handles this already, but e.g. for field types we need
     /// to do it as well.
+    #[tracing::instrument(level = "debug", skip(self))]
     fn normalize_associated_types_in<T>(&mut self, ty: T) -> T
     where
         T: HasInterner<Interner = Interner> + TypeFoldable<Interner>,
@@ -925,14 +1019,17 @@ impl<'a> InferenceContext<'a> {
         self.table.normalize_associated_types_in(ty)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn resolve_ty_shallow(&mut self, ty: &Ty) -> Ty {
         self.table.resolve_ty_shallow(ty)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn resolve_associated_type(&mut self, inner_ty: Ty, assoc_ty: Option<TypeAliasId>) -> Ty {
         self.resolve_associated_type_with_params(inner_ty, assoc_ty, &[])
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     fn resolve_associated_type_with_params(
         &mut self,
         inner_ty: Ty,
@@ -975,7 +1072,10 @@ impl<'a> InferenceContext<'a> {
         };
         let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver);
         let (resolution, unresolved) = if value_ns {
-            match self.resolver.resolve_path_in_value_ns(self.db.upcast(), path) {
+            match self
+                .resolver
+                .resolve_path_in_value_ns(self.db.upcast(), path)
+            {
                 Some(ResolveValueResult::ValueNs(value)) => match value {
                     ValueNs::EnumVariantId(var) => {
                         let substs = ctx.substs_from_path(path, var.into(), true);
@@ -996,7 +1096,10 @@ impl<'a> InferenceContext<'a> {
                 None => return (self.err_ty(), None),
             }
         } else {
-            match self.resolver.resolve_path_in_type_ns(self.db.upcast(), path) {
+            match self
+                .resolver
+                .resolve_path_in_type_ns(self.db.upcast(), path)
+            {
                 Some(it) => it,
                 None => return (self.err_ty(), None),
             }
@@ -1047,7 +1150,10 @@ impl<'a> InferenceContext<'a> {
                         let enum_data = self.db.enum_data(id);
                         let name = current_segment.first().unwrap().name;
                         if let Some(local_id) = enum_data.variant(name) {
-                            let variant = EnumVariantId { parent: id, local_id };
+                            let variant = EnumVariantId {
+                                parent: id,
+                                local_id,
+                            };
                             return if remaining_segments.len() == 1 {
                                 (ty, Some(variant.into()))
                             } else {
@@ -1143,7 +1249,9 @@ impl<'a> InferenceContext<'a> {
         unresolved: Option<usize>,
         path: &ModPath,
     ) -> (Ty, Option<VariantId>) {
-        let remaining = unresolved.map(|x| path.segments()[x..].len()).filter(|x| x > &0);
+        let remaining = unresolved
+            .map(|x| path.segments()[x..].len())
+            .filter(|x| x > &0);
         match remaining {
             None => {
                 let variant = ty.as_adt().and_then(|(adt_id, _)| match adt_id {
@@ -1162,7 +1270,10 @@ impl<'a> InferenceContext<'a> {
                 if let Some((AdtId::EnumId(enum_id), _)) = ty.as_adt() {
                     let enum_data = self.db.enum_data(enum_id);
                     if let Some(local_id) = enum_data.variant(segment) {
-                        let variant = EnumVariantId { parent: enum_id, local_id };
+                        let variant = EnumVariantId {
+                            parent: enum_id,
+                            local_id,
+                        };
                         return (ty, Some(variant.into()));
                     }
                 }
@@ -1182,7 +1293,9 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn resolve_output_on(&self, trait_: TraitId) -> Option<TypeAliasId> {
-        self.db.trait_data(trait_).associated_type_by_name(&name![Output])
+        self.db
+            .trait_data(trait_)
+            .associated_type_by_name(&name![Output])
     }
 
     fn resolve_lang_trait(&self, lang: LangItem) -> Option<TraitId> {
@@ -1223,7 +1336,9 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn resolve_range_inclusive(&self) -> Option<AdtId> {
-        let struct_ = self.resolve_lang_item(LangItem::RangeInclusiveStruct)?.as_struct()?;
+        let struct_ = self
+            .resolve_lang_item(LangItem::RangeInclusiveStruct)?
+            .as_struct()?;
         Some(struct_.into())
     }
 
@@ -1238,7 +1353,9 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn resolve_range_to_inclusive(&self) -> Option<AdtId> {
-        let struct_ = self.resolve_lang_item(LangItem::RangeToInclusive)?.as_struct()?;
+        let struct_ = self
+            .resolve_lang_item(LangItem::RangeToInclusive)?
+            .as_struct()?;
         Some(struct_.into())
     }
 
@@ -1254,7 +1371,13 @@ impl<'a> InferenceContext<'a> {
     fn get_traits_in_scope(&self) -> Either<FxHashSet<TraitId>, &FxHashSet<TraitId>> {
         let mut b_traits = self.resolver.traits_in_scope_from_block_scopes().peekable();
         if b_traits.peek().is_some() {
-            Either::Left(self.traits_in_scope.iter().copied().chain(b_traits).collect())
+            Either::Left(
+                self.traits_in_scope
+                    .iter()
+                    .copied()
+                    .chain(b_traits)
+                    .collect(),
+            )
         } else {
             Either::Right(&self.traits_in_scope)
         }
@@ -1305,7 +1428,10 @@ impl Expectation {
     /// See the test case `test/ui/coerce-expect-unsized.rs` and #20169
     /// for examples of where this comes up,.
     fn rvalue_hint(ctx: &mut InferenceContext<'_>, ty: Ty) -> Self {
-        match ctx.struct_tail_without_normalization(ty.clone()).kind(Interner) {
+        match ctx
+            .struct_tail_without_normalization(ty.clone())
+            .kind(Interner)
+        {
             TyKind::Slice(_) | TyKind::Str | TyKind::Dyn(_) => Expectation::RValueLikeUnsized(ty),
             _ => Expectation::has_type(ty),
         }
@@ -1346,7 +1472,8 @@ impl Expectation {
     }
 
     fn coercion_target_type(&self, table: &mut unify::InferenceTable<'_>) -> Ty {
-        self.only_has_type(table).unwrap_or_else(|| table.new_type_var())
+        self.only_has_type(table)
+            .unwrap_or_else(|| table.new_type_var())
     }
 
     /// Comment copied from rustc:

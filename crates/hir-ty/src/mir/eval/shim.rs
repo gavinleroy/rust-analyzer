@@ -90,8 +90,10 @@ impl Evaluator<'_> {
             return Ok(true);
         }
         if let Some(x) = self.detect_lang_function(def) {
-            let arg_bytes =
-                args.iter().map(|x| Ok(x.get(&self)?.to_owned())).collect::<Result<Vec<_>>>()?;
+            let arg_bytes = args
+                .iter()
+                .map(|x| Ok(x.get(&self)?.to_owned()))
+                .collect::<Result<Vec<_>>>()?;
             let result = self.exec_lang_item(x, generic_args, &arg_bytes, locals, span)?;
             destination.write_from_bytes(self, &result)?;
             return Ok(true);
@@ -125,8 +127,17 @@ impl Evaluator<'_> {
                 let new_size = from_bytes!(usize, new_size.get(self)?);
                 let align = from_bytes!(usize, align.get(self)?);
                 let result = self.heap_allocate(new_size, align);
-                Interval { addr: result, size: old_size }
-                    .write_from_interval(self, Interval { addr: ptr, size: old_size })?;
+                Interval {
+                    addr: result,
+                    size: old_size,
+                }
+                .write_from_interval(
+                    self,
+                    Interval {
+                        addr: ptr,
+                        size: old_size,
+                    },
+                )?;
                 destination.write_from_bytes(self, &result.to_bytes())?;
             }
             _ => not_supported!("unknown alloc function"),
@@ -158,13 +169,18 @@ impl Evaluator<'_> {
             BeginPanic => Err(MirEvalError::Panic("<unknown-panic-payload>".to_string())),
             PanicFmt => {
                 let message = (|| {
-                    let arguments_struct =
-                        self.db.lang_item(self.crate_id, LangItem::FormatArguments)?.as_struct()?;
+                    let arguments_struct = self
+                        .db
+                        .lang_item(self.crate_id, LangItem::FormatArguments)?
+                        .as_struct()?;
                     let arguments_layout = self
                         .layout_adt(arguments_struct.into(), Substitution::empty(Interner))
                         .ok()?;
-                    let arguments_field_pieces =
-                        self.db.struct_data(arguments_struct).variant_data.field(&name![pieces])?;
+                    let arguments_field_pieces = self
+                        .db
+                        .struct_data(arguments_struct)
+                        .variant_data
+                        .field(&name![pieces])?;
                     let pieces_offset = arguments_layout
                         .fields
                         .offset(u32::from(arguments_field_pieces.into_raw()) as usize)
@@ -199,22 +215,23 @@ impl Evaluator<'_> {
                 Err(MirEvalError::Panic(message))
             }
             SliceLen => {
-                let arg = args
-                    .next()
-                    .ok_or(MirEvalError::TypeError("argument of <[T]>::len() is not provided"))?;
+                let arg = args.next().ok_or(MirEvalError::TypeError(
+                    "argument of <[T]>::len() is not provided",
+                ))?;
                 let ptr_size = arg.len() / 2;
                 Ok(arg[ptr_size..].into())
             }
             DropInPlace => {
-                let ty =
-                    generic_args.as_slice(Interner).get(0).and_then(|x| x.ty(Interner)).ok_or(
-                        MirEvalError::TypeError(
-                            "generic argument of drop_in_place is not provided",
-                        ),
-                    )?;
-                let arg = args
-                    .next()
-                    .ok_or(MirEvalError::TypeError("argument of drop_in_place is not provided"))?;
+                let ty = generic_args
+                    .as_slice(Interner)
+                    .get(0)
+                    .and_then(|x| x.ty(Interner))
+                    .ok_or(MirEvalError::TypeError(
+                        "generic argument of drop_in_place is not provided",
+                    ))?;
+                let arg = args.next().ok_or(MirEvalError::TypeError(
+                    "argument of drop_in_place is not provided",
+                ))?;
                 self.run_drop_glue_deep(
                     ty.clone(),
                     locals,
@@ -511,7 +528,11 @@ impl Evaluator<'_> {
                 let bits = destination.size * 8;
                 // FIXME: signed
                 let is_signed = false;
-                let mx: u128 = if is_signed { (1 << (bits - 1)) - 1 } else { (1 << bits) - 1 };
+                let mx: u128 = if is_signed {
+                    (1 << (bits - 1)) - 1
+                } else {
+                    (1 << bits) - 1
+                };
                 // FIXME: signed
                 let mn: u128 = 0;
                 let ans = cmp::min(mx, cmp::max(mn, ans));
@@ -588,7 +609,9 @@ impl Evaluator<'_> {
                     _ => unreachable!(),
                 };
                 let is_overflow = u128overflow
-                    || ans.to_le_bytes()[op_size..].iter().any(|&x| x != 0 && x != 255);
+                    || ans.to_le_bytes()[op_size..]
+                        .iter()
+                        .any(|&x| x != 0 && x != 255);
                 let is_overflow = vec![u8::from(is_overflow)];
                 let layout = self.layout(&result_ty)?;
                 let result = self.make_by_layout(
@@ -705,8 +728,10 @@ impl Evaluator<'_> {
             return Err(MirEvalError::TypeError("atomic intrinsic arg0 is not provided"));
         };
         let arg0_addr = Address::from_bytes(arg0.get(self)?)?;
-        let arg0_interval =
-            Interval::new(arg0_addr, self.size_of_sized(ty, locals, "atomic intrinsic type arg")?);
+        let arg0_interval = Interval::new(
+            arg0_addr,
+            self.size_of_sized(ty, locals, "atomic intrinsic type arg")?,
+        );
         if name.starts_with("load_") {
             return destination.write_from_interval(self, arg0_interval);
         }
@@ -782,8 +807,11 @@ impl Evaluator<'_> {
                 layout.size.bytes_usize(),
                 &layout,
                 None,
-                [IntervalOrOwned::Borrowed(dest.0), IntervalOrOwned::Owned(vec![u8::from(dest.1)])]
-                    .into_iter(),
+                [
+                    IntervalOrOwned::Borrowed(dest.0),
+                    IntervalOrOwned::Owned(vec![u8::from(dest.1)]),
+                ]
+                .into_iter(),
             )?;
             return destination.write_from_bytes(self, &result);
         }

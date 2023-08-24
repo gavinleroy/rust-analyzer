@@ -168,7 +168,10 @@ impl MirLowerError {
                 writeln!(
                     f,
                     "Generic arg not provided for {}",
-                    param.name().unwrap_or(&Name::missing()).display(db.upcast())
+                    param
+                        .name()
+                        .unwrap_or(&Name::missing())
+                        .display(db.upcast())
                 )?;
                 writeln!(f, "Provided args: [")?;
                 for g in subst.iter(Interner) {
@@ -1150,8 +1153,10 @@ impl<'ctx> MirLowerCtx<'ctx> {
                     .ok_or(MirLowerError::TypeError("named field on tuple"))?;
                 *place = place.project(ProjectionElem::TupleOrClosureField(index))
             } else {
-                let field =
-                    self.infer.field_resolution(expr_id).ok_or(MirLowerError::UnresolvedField)?;
+                let field = self
+                    .infer
+                    .field_resolution(expr_id)
+                    .ok_or(MirLowerError::UnresolvedField)?;
                 *place = place.project(ProjectionElem::Field(field));
             }
         } else {
@@ -1232,11 +1237,17 @@ impl<'ctx> MirLowerCtx<'ctx> {
                 8 => f.into_f64().to_le_bytes().into(),
                 4 => f.into_f32().to_le_bytes().into(),
                 _ => {
-                    return Err(MirLowerError::TypeError("float with size other than 4 or 8 bytes"))
+                    return Err(MirLowerError::TypeError(
+                        "float with size other than 4 or 8 bytes",
+                    ))
                 }
             },
         };
-        Ok(Operand::from_concrete_const(bytes, MemoryMap::default(), ty))
+        Ok(Operand::from_concrete_const(
+            bytes,
+            MemoryMap::default(),
+            ty,
+        ))
     }
 
     fn new_basic_block(&mut self) -> BasicBlockId {
@@ -1343,7 +1354,11 @@ impl<'ctx> MirLowerCtx<'ctx> {
         is_uninhabited: bool,
         span: MirSpan,
     ) -> Result<Option<BasicBlockId>> {
-        let b = if is_uninhabited { None } else { Some(self.new_basic_block()) };
+        let b = if is_uninhabited {
+            None
+        } else {
+            Some(self.new_basic_block())
+        };
         self.set_terminator(
             current,
             TerminatorKind::Call {
@@ -1364,7 +1379,10 @@ impl<'ctx> MirLowerCtx<'ctx> {
     }
 
     fn set_terminator(&mut self, source: BasicBlockId, terminator: TerminatorKind, span: MirSpan) {
-        self.result.basic_blocks[source].terminator = Some(Terminator { span, kind: terminator });
+        self.result.basic_blocks[source].terminator = Some(Terminator {
+            span,
+            kind: terminator,
+        });
     }
 
     fn set_goto(&mut self, source: BasicBlockId, target: BasicBlockId, span: MirSpan) {
@@ -1424,7 +1442,12 @@ impl<'ctx> MirLowerCtx<'ctx> {
         let begin = self.new_basic_block();
         let prev = mem::replace(
             &mut self.current_loop_blocks,
-            Some(LoopBlocks { begin, end: None, place, drop_scope_index: self.drop_scopes.len() }),
+            Some(LoopBlocks {
+                begin,
+                end: None,
+                place,
+                drop_scope_index: self.drop_scopes.len(),
+            }),
         );
         let prev_label = if let Some(label) = label {
             // We should generate the end now, to make sure that it wouldn't change later. It is
@@ -1448,7 +1471,12 @@ impl<'ctx> MirLowerCtx<'ctx> {
     }
 
     fn has_adjustments(&self, expr_id: ExprId) -> bool {
-        !self.infer.expr_adjustments.get(&expr_id).map(|x| x.is_empty()).unwrap_or(true)
+        !self
+            .infer
+            .expr_adjustments
+            .get(&expr_id)
+            .map(|x| x.is_empty())
+            .unwrap_or(true)
     }
 
     fn merge_blocks(
@@ -1494,7 +1522,11 @@ impl<'ctx> MirLowerCtx<'ctx> {
     }
 
     fn is_uninhabited(&self, expr_id: ExprId) -> bool {
-        is_ty_uninhabited_from(&self.infer[expr_id], self.owner.module(self.db.upcast()), self.db)
+        is_ty_uninhabited_from(
+            &self.infer[expr_id],
+            self.owner.module(self.db.upcast()),
+            self.db,
+        )
     }
 
     /// This function push `StorageLive` statement for the binding, and applies changes to add `StorageDead` and
@@ -1523,7 +1555,9 @@ impl<'ctx> MirLowerCtx<'ctx> {
 
     fn resolve_lang_item(&self, item: LangItem) -> Result<LangItemTarget> {
         let crate_id = self.owner.module(self.db.upcast()).krate();
-        self.db.lang_item(crate_id, item).ok_or(MirLowerError::LangItemNotFound(item))
+        self.db
+            .lang_item(crate_id, item)
+            .ok_or(MirLowerError::LangItemNotFound(item))
     }
 
     fn lower_block_to_place(
@@ -1537,7 +1571,12 @@ impl<'ctx> MirLowerCtx<'ctx> {
         let scope = self.push_drop_scope();
         for statement in statements.iter() {
             match statement {
-                hir_def::hir::Statement::Let { pat, initializer, else_branch, type_ref: _ } => {
+                hir_def::hir::Statement::Let {
+                    pat,
+                    initializer,
+                    else_branch,
+                    type_ref: _,
+                } => {
                     if let Some(expr_id) = initializer {
                         let else_block;
                         let Some((init_place, c)) =
@@ -1602,34 +1641,43 @@ impl<'ctx> MirLowerCtx<'ctx> {
         pick_binding: impl Fn(BindingId) -> bool,
     ) -> Result<BasicBlockId> {
         let base_param_count = self.result.param_locals.len();
-        self.result.param_locals.extend(params.clone().map(|(x, ty)| {
-            let local_id = self.result.locals.alloc(Local { ty });
-            self.drop_scopes.last_mut().unwrap().locals.push(local_id);
-            if let Pat::Bind { id, subpat: None } = self.body[x] {
-                if matches!(
-                    self.body.bindings[id].mode,
-                    BindingAnnotation::Unannotated | BindingAnnotation::Mutable
-                ) {
-                    self.result.binding_locals.insert(id, local_id);
+        self.result
+            .param_locals
+            .extend(params.clone().map(|(x, ty)| {
+                let local_id = self.result.locals.alloc(Local { ty });
+                self.drop_scopes.last_mut().unwrap().locals.push(local_id);
+                if let Pat::Bind { id, subpat: None } = self.body[x] {
+                    if matches!(
+                        self.body.bindings[id].mode,
+                        BindingAnnotation::Unannotated | BindingAnnotation::Mutable
+                    ) {
+                        self.result.binding_locals.insert(id, local_id);
+                    }
                 }
-            }
-            local_id
-        }));
+                local_id
+            }));
         // and then rest of bindings
         for (id, _) in self.body.bindings.iter() {
             if !pick_binding(id) {
                 continue;
             }
             if !self.result.binding_locals.contains_idx(id) {
-                self.result
-                    .binding_locals
-                    .insert(id, self.result.locals.alloc(Local { ty: self.infer[id].clone() }));
+                self.result.binding_locals.insert(
+                    id,
+                    self.result.locals.alloc(Local {
+                        ty: self.infer[id].clone(),
+                    }),
+                );
             }
         }
         let mut current = self.result.start_block;
-        for ((param, _), local) in
-            params.zip(self.result.param_locals.clone().into_iter().skip(base_param_count))
-        {
+        for ((param, _), local) in params.zip(
+            self.result
+                .param_locals
+                .clone()
+                .into_iter()
+                .skip(base_param_count),
+        ) {
             if let Pat::Bind { id, .. } = self.body[param] {
                 if local == self.binding_local(id)? {
                     continue;
@@ -1665,7 +1713,9 @@ impl<'ctx> MirLowerCtx<'ctx> {
                 let name = format!(
                     "{}::{}",
                     data.name.display(self.db.upcast()),
-                    data.variants[variant.local_id].name.display(self.db.upcast())
+                    data.variants[variant.local_id]
+                        .name
+                        .display(self.db.upcast())
                 );
                 Err(MirLowerError::ConstEvalError(name, Box::new(e)))
             }
@@ -1713,11 +1763,19 @@ impl<'ctx> MirLowerCtx<'ctx> {
         current: &mut Idx<BasicBlock>,
     ) {
         for &l in scope.locals.iter().rev() {
-            if !self.result.locals[l].ty.clone().is_copy(self.db, self.owner) {
+            if !self.result.locals[l]
+                .ty
+                .clone()
+                .is_copy(self.db, self.owner)
+            {
                 let prev = std::mem::replace(current, self.new_basic_block());
                 self.set_terminator(
                     prev,
-                    TerminatorKind::Drop { place: l.into(), target: *current, unwind: None },
+                    TerminatorKind::Drop {
+                        place: l.into(),
+                        target: *current,
+                        unwind: None,
+                    },
                     MirSpan::Unknown,
                 );
             }
@@ -1781,7 +1839,9 @@ pub fn mir_body_for_closure_query(
     let (captures, kind) = infer.closure_info(&closure);
     let mut ctx = MirLowerCtx::new(db, owner, &body, &infer);
     // 0 is return local
-    ctx.result.locals.alloc(Local { ty: infer[*root].clone() });
+    ctx.result.locals.alloc(Local {
+        ty: infer[*root].clone(),
+    });
     let closure_local = ctx.result.locals.alloc(Local {
         ty: match kind {
             FnTrait::FnOnce => infer[expr].clone(),
@@ -1796,7 +1856,9 @@ pub fn mir_body_for_closure_query(
         implementation_error!("closure has not callable sig");
     };
     let current = ctx.lower_params_and_bindings(
-        args.iter().zip(sig.params().iter()).map(|(x, y)| (*x, y.clone())),
+        args.iter()
+            .zip(sig.params().iter())
+            .map(|(x, y)| (*x, y.clone())),
         |_| true,
     )?;
     if let Some(current) = ctx.lower_expr_to_place(*root, return_slot().into(), current)? {
@@ -1873,9 +1935,10 @@ pub fn mir_body_query(db: &dyn HirDatabase, def: DefWithBodyId) -> Result<Arc<Mi
             .unwrap_or_else(Name::missing)
             .display(db.upcast())
             .to_string(),
-        DefWithBodyId::VariantId(it) => {
-            db.enum_data(it.parent).variants[it.local_id].name.display(db.upcast()).to_string()
-        }
+        DefWithBodyId::VariantId(it) => db.enum_data(it.parent).variants[it.local_id]
+            .name
+            .display(db.upcast())
+            .to_string(),
     });
     let body = db.body(def);
     let infer = db.infer(def);
@@ -1906,7 +1969,9 @@ pub fn lower_to_mir(
     }
     let mut ctx = MirLowerCtx::new(db, owner, body, infer);
     // 0 is return local
-    ctx.result.locals.alloc(Local { ty: ctx.expr_ty_after_adjustments(root_expr) });
+    ctx.result.locals.alloc(Local {
+        ty: ctx.expr_ty_after_adjustments(root_expr),
+    });
     let binding_picker = |b: BindingId| {
         if root_expr == body.body_expr {
             body[b].owner.is_none()
@@ -1921,8 +1986,9 @@ pub fn lower_to_mir(
             // otherwise it's an inline const, and has no parameter
             if let DefWithBodyId::FunctionId(fid) = owner {
                 let substs = TyBuilder::placeholder_subst(db, fid);
-                let callable_sig =
-                    db.callable_item_signature(fid.into()).substitute(Interner, &substs);
+                let callable_sig = db
+                    .callable_item_signature(fid.into())
+                    .substitute(Interner, &substs);
                 break 'b ctx.lower_params_and_bindings(
                     body.params
                         .iter()
