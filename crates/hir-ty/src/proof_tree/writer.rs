@@ -91,11 +91,7 @@ impl<'a, 'b> DebugContext<'a, 'b> {
     {
         use std::collections::hash_map::Entry;
 
-        let mut this = DebugContext {
-            db: &*self.db,
-            ir: &*self.ir,
-            mapping: map,
-        };
+        let mut this = DebugContext { db: &*self.db, ir: &*self.ir, mapping: map };
 
         for (&k, &v) in self.mapping.iter() {
             match this.mapping.entry(k) {
@@ -230,61 +226,37 @@ impl<T: DeepDebug> DeepDebug for Wrapped<'_, T, WrapSquare> {
 
 impl<'a, T: DeepDebug> ToWrapped<'a, T> for [T] {
     fn using_angle(&'a self) -> Wrapped<'a, T, WrapAngle> {
-        Wrapped {
-            data: self,
-            phantom: PhantomData,
-        }
+        Wrapped { data: self, phantom: PhantomData }
     }
 
     fn using_round(&'a self) -> Wrapped<'a, T, WrapRound> {
-        Wrapped {
-            data: self,
-            phantom: PhantomData,
-        }
+        Wrapped { data: self, phantom: PhantomData }
     }
 
     fn using_curly(&'a self) -> Wrapped<'a, T, WrapCurly> {
-        Wrapped {
-            data: self,
-            phantom: PhantomData,
-        }
+        Wrapped { data: self, phantom: PhantomData }
     }
 
     fn using_square(&'a self) -> Wrapped<'a, T, WrapSquare> {
-        Wrapped {
-            data: self,
-            phantom: PhantomData,
-        }
+        Wrapped { data: self, phantom: PhantomData }
     }
 }
 
 impl<'a> ToWrapped<'a, GenericArg<Interner>> for Substitution<Interner> {
     fn using_angle(&'a self) -> Wrapped<'a, GenericArg<Interner>, WrapAngle> {
-        Wrapped {
-            data: self.as_slice(Interner),
-            phantom: PhantomData,
-        }
+        Wrapped { data: self.as_slice(Interner), phantom: PhantomData }
     }
 
     fn using_round(&'a self) -> Wrapped<'a, GenericArg<Interner>, WrapRound> {
-        Wrapped {
-            data: self.as_slice(Interner),
-            phantom: PhantomData,
-        }
+        Wrapped { data: self.as_slice(Interner), phantom: PhantomData }
     }
 
     fn using_curly(&'a self) -> Wrapped<'a, GenericArg<Interner>, WrapCurly> {
-        Wrapped {
-            data: self.as_slice(Interner),
-            phantom: PhantomData,
-        }
+        Wrapped { data: self.as_slice(Interner), phantom: PhantomData }
     }
 
     fn using_square(&'a self) -> Wrapped<'a, GenericArg<Interner>, WrapSquare> {
-        Wrapped {
-            data: self.as_slice(Interner),
-            phantom: PhantomData,
-        }
+        Wrapped { data: self.as_slice(Interner), phantom: PhantomData }
     }
 }
 
@@ -296,10 +268,7 @@ struct GenericFallback<'a> {
 
 impl<'a> GenericFallback<'a> {
     fn new(id: impl Into<GenericDefId>, subst: &'a [GenericArg<Interner>]) -> Self {
-        Self {
-            id: id.into(),
-            subst,
-        }
+        Self { id: id.into(), subst }
     }
 }
 
@@ -331,19 +300,14 @@ impl DeepDebug for GenericFallback<'_> {
                     (Some(ty), Some(source_name))
                         if ty.bound_var(Interner).is_some() && source_name.as_str().is_some() =>
                     {
-                        Some((
-                            ty.bound_var(Interner).unwrap(),
-                            source_name.as_str().unwrap(),
-                        ))
+                        Some((ty.bound_var(Interner).unwrap(), source_name.as_str().unwrap()))
                     }
                     _ => None,
                 }
             })
             .collect::<FxHashMap<_, _>>();
 
-        ctxt.shift_context(associations, |ctxt| {
-            self.subst.using_angle().fmt_deep(fmt, ctxt)
-        })
+        ctxt.shift_context(associations, |ctxt| self.subst.using_angle().fmt_deep(fmt, ctxt))
     }
 }
 
@@ -451,7 +415,7 @@ impl DeepDebug for ClosureId<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> std::fmt::Result {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -461,7 +425,7 @@ impl DeepDebug for GeneratorId<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> std::fmt::Result {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -471,7 +435,7 @@ impl DeepDebug for ForeignDefId<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> std::fmt::Result {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -511,7 +475,7 @@ impl DeepDebug for ConcreteConst<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -657,7 +621,7 @@ impl DeepDebug for OpaqueTyId<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -667,7 +631,7 @@ impl DeepDebug for UniverseIndex {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -714,16 +678,16 @@ impl DeepDebug for TyKind<Interner> {
                 deep!(fmt, ctxt, ga)
             }
             TyKind::AssociatedType(_assoc_ty, _substitution) => {
-                todo!();
+                write!(fmt, "{:?}", self)
             }
             TyKind::Tuple(_arity, substitution) => {
                 deep!(fmt, ctxt, substitution.using_round())
             }
             TyKind::OpaqueType(_opaque_ty, _substitution) => {
-                todo!();
+                write!(fmt, "{:?}", self)
             }
             TyKind::Slice(_substitution) => {
-                todo!();
+                write!(fmt, "{:?}", self)
             }
             TyKind::FnDef(fn_def, substitution) => {
                 let call_id = CallableDefId::from_chalk(ctxt.db, *fn_def);
@@ -731,13 +695,13 @@ impl DeepDebug for TyKind<Interner> {
                 deep!(fmt, ctxt, fn_def, ga)
             }
             TyKind::Closure(_id, _substitution) => {
-                todo!();
+                write!(fmt, "{:?}", self)
             }
             TyKind::Generator(_generator, _substitution) => {
-                todo!();
+                write!(fmt, "{:?}", self)
             }
             TyKind::GeneratorWitness(_witness, _substitution) => {
-                todo!();
+                write!(fmt, "{:?}", self)
             }
 
             TyKind::Scalar(scalar) => scalar.fmt_deep(fmt, ctxt),
@@ -764,7 +728,7 @@ impl DeepDebug for Scalar {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -788,7 +752,7 @@ impl DeepDebug for DebruijnIndex {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -798,7 +762,7 @@ impl DeepDebug for DynTy<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -847,11 +811,7 @@ impl DeepDebug for FnPointer<Interner> {
         fmt: &mut Formatter<'_>,
         ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        let FnPointer {
-            num_binders: _,
-            substitution,
-            sig,
-        } = self;
+        let FnPointer { num_binders: _, substitution, sig } = self;
 
         deep!(fmt, ctxt, sig.safety, "fn", substitution)
     }
@@ -880,7 +840,7 @@ impl<'a> DeepDebug for VariableKindsInnerDebug<'a, Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -890,7 +850,7 @@ impl DeepDebug for ConstData<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -943,7 +903,7 @@ impl<'a> DeepDebug for ProgramClauseImplicationDebug<'a, Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -953,7 +913,7 @@ impl<'a> DeepDebug for TyKindDebug<'a, Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -963,7 +923,7 @@ impl<'a> DeepDebug for SubstitutionDebug<'a, Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -973,7 +933,7 @@ impl DeepDebug for PlaceholderIndex {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -983,10 +943,7 @@ impl DeepDebug for TraitRef<Interner> {
         fmt: &mut Formatter<'_>,
         ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        let dbg = SeparatorTraitRef {
-            trait_ref: self,
-            separator: " as ",
-        };
+        let dbg = SeparatorTraitRef { trait_ref: self, separator: " as " };
 
         dbg.fmt_deep(fmt, ctxt)
     }
@@ -998,7 +955,7 @@ impl DeepDebug for LifetimeOutlives<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -1008,7 +965,7 @@ impl DeepDebug for TypeOutlives<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -1018,7 +975,7 @@ impl<'a> DeepDebug for ProjectionTyDebug<'a, Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -1050,10 +1007,7 @@ impl DeepDebug for WhereClause<Interner> {
     ) -> Result<(), Error> {
         match self {
             WhereClause::Implemented(tr) => {
-                let dbg = SeparatorTraitRef {
-                    trait_ref: tr,
-                    separator: ": ",
-                };
+                let dbg = SeparatorTraitRef { trait_ref: tr, separator: ": " };
 
                 deep!(fmt, ctxt, dbg)
             }
@@ -1072,10 +1026,7 @@ impl DeepDebug for FromEnv<Interner> {
     ) -> Result<(), Error> {
         match self {
             FromEnv::Trait(t) => {
-                let dbg = SeparatorTraitRef {
-                    trait_ref: t,
-                    separator: ": ",
-                };
+                let dbg = SeparatorTraitRef { trait_ref: t, separator: ": " };
 
                 deep!(fmt, ctxt, "FromEnv(", dbg, ")")
             }
@@ -1092,10 +1043,7 @@ impl DeepDebug for WellFormed<Interner> {
     ) -> Result<(), Error> {
         match self {
             WellFormed::Trait(t) => {
-                let dbg = SeparatorTraitRef {
-                    trait_ref: t,
-                    separator: ": ",
-                };
+                let dbg = SeparatorTraitRef { trait_ref: t, separator: ": " };
 
                 deep!(fmt, ctxt, "FromEnv(", dbg, ")")
             }
@@ -1125,7 +1073,7 @@ impl DeepDebug for DomainGoal<Interner> {
             // | DomainGoal::LocalImplAllowed(..)
             | DomainGoal::DownstreamType(..)
             | DomainGoal::Reveal
-            | DomainGoal::ObjectSafe(..) => todo!(),
+            | DomainGoal::ObjectSafe(..) => write!(fmt, "{:?}", self),
         }
     }
 }
@@ -1156,7 +1104,7 @@ impl<T: HasInterner + Debug> DeepDebug for Binders<T> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -1166,7 +1114,7 @@ impl DeepDebug for ProgramClauseData<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
@@ -1176,7 +1124,7 @@ impl DeepDebug for Environment<Interner> {
         _fmt: &mut Formatter<'_>,
         _ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        write!(_fmt, "{:?}", self)
     }
 }
 
