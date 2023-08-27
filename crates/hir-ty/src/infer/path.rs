@@ -22,7 +22,6 @@ use crate::{
 use super::{ExprOrPatId, InferenceContext, TraitRef};
 
 impl InferenceContext<'_> {
-    #[tracing::instrument(level = "debug", skip(self))]
     pub(super) fn infer_path(&mut self, path: &Path, id: ExprOrPatId) -> Option<Ty> {
         let (value_def, generic_def, substs) = match self.resolve_value_path(path, id)? {
             ValuePathResolution::GenericDef(value_def, generic_def, substs) => {
@@ -40,7 +39,6 @@ impl InferenceContext<'_> {
         Some(ty)
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
     fn resolve_value_path(&mut self, path: &Path, id: ExprOrPatId) -> Option<ValuePathResolution> {
         let (value, self_subst) = if let Some(type_ref) = path.type_anchor() {
             let last = path.segments().last()?;
@@ -56,13 +54,11 @@ impl InferenceContext<'_> {
             let (ty, _) = ctx.lower_ty_relative_path(ty, orig_ns, remaining_segments_for_ty);
             let ty = self.table.insert_type_vars(ty);
             let ty = self.table.normalize_associated_types_in(ty);
-            self.resolve_ty_assoc_item(ty, last.name, id)
-                .map(|(it, substs)| (it, Some(substs)))?
+            self.resolve_ty_assoc_item(ty, last.name, id).map(|(it, substs)| (it, Some(substs)))?
         } else {
             // FIXME: report error, unresolved first path segment
-            let value_or_partial = self
-                .resolver
-                .resolve_path_in_value_ns(self.db.upcast(), path)?;
+            let value_or_partial =
+                self.resolver.resolve_path_in_value_ns(self.db.upcast(), path)?;
 
             match value_or_partial {
                 ResolveValueResult::ValueNs(it, _) => (it, None),
@@ -123,10 +119,7 @@ impl InferenceContext<'_> {
             Some(Substitution::from_iter(Interner, parent_args))
         });
         let parent_substs_len = parent_substs.as_ref().map_or(0, |s| s.len(Interner));
-        let mut it = substs
-            .iter()
-            .take(substs.len() - parent_substs_len)
-            .cloned();
+        let mut it = substs.iter().take(substs.len() - parent_substs_len).cloned();
 
         let Some(generic_def) = value_def.to_generic_def_id() else {
             // `value_def` is the kind of item that can never be generic (i.e. statics, at least
@@ -148,22 +141,14 @@ impl InferenceContext<'_> {
             })
             .build();
 
-        Some(ValuePathResolution::GenericDef(
-            value_def,
-            generic_def,
-            substs,
-        ))
+        Some(ValuePathResolution::GenericDef(value_def, generic_def, substs))
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
     fn add_required_obligations_for_value_path(&mut self, def: GenericDefId, subst: &Substitution) {
         let predicates = self.db.generic_predicates(def);
-        tracing::debug!(?predicates, "Predicates for GenericDefId");
         for predicate in predicates.iter() {
-            let (predicate, binders) = predicate
-                .clone()
-                .substitute(Interner, &subst)
-                .into_value_and_skipped_binders();
+            let (predicate, binders) =
+                predicate.clone().substitute(Interner, &subst).into_value_and_skipped_binders();
             // Quantified where clauses are not yet handled.
             stdx::always!(binders.is_empty(Interner));
             self.push_obligation(predicate.cast(Interner));
@@ -180,10 +165,8 @@ impl InferenceContext<'_> {
             let param_len = generics(self.db.upcast(), def).len_self();
             let parent_subst =
                 Substitution::from_iter(Interner, subst.iter(Interner).skip(param_len));
-            let trait_ref = TraitRef {
-                trait_id: to_chalk_trait_id(trait_),
-                substitution: parent_subst,
-            };
+            let trait_ref =
+                TraitRef { trait_id: to_chalk_trait_id(trait_), substitution: parent_subst };
             self.push_obligation(trait_ref.cast(Interner));
         }
     }
@@ -242,9 +225,8 @@ impl InferenceContext<'_> {
                 let ty = self.insert_type_vars(ty);
                 let ty = self.normalize_associated_types_in(ty);
 
-                let segment = remaining_segments
-                    .last()
-                    .expect("there should be at least one segment here");
+                let segment =
+                    remaining_segments.last().expect("there should be at least one segment here");
 
                 self.resolve_ty_assoc_item(ty, segment.name, id)
             }
@@ -258,35 +240,32 @@ impl InferenceContext<'_> {
         id: ExprOrPatId,
     ) -> Option<(ValueNs, Substitution)> {
         let trait_ = trait_ref.hir_trait_id();
-        let item = self
-            .db
-            .trait_data(trait_)
-            .items
-            .iter()
-            .map(|(_name, id)| *id)
-            .find_map(|item| match item {
-                AssocItemId::FunctionId(func) => {
-                    if segment.name == &self.db.function_data(func).name {
-                        Some(AssocItemId::FunctionId(func))
-                    } else {
-                        None
+        let item =
+            self.db.trait_data(trait_).items.iter().map(|(_name, id)| *id).find_map(|item| {
+                match item {
+                    AssocItemId::FunctionId(func) => {
+                        if segment.name == &self.db.function_data(func).name {
+                            Some(AssocItemId::FunctionId(func))
+                        } else {
+                            None
+                        }
                     }
-                }
 
-                AssocItemId::ConstId(konst) => {
-                    if self
-                        .db
-                        .const_data(konst)
-                        .name
-                        .as_ref()
-                        .map_or(false, |n| n == segment.name)
-                    {
-                        Some(AssocItemId::ConstId(konst))
-                    } else {
-                        None
+                    AssocItemId::ConstId(konst) => {
+                        if self
+                            .db
+                            .const_data(konst)
+                            .name
+                            .as_ref()
+                            .map_or(false, |n| n == segment.name)
+                        {
+                            Some(AssocItemId::ConstId(konst))
+                        } else {
+                            None
+                        }
                     }
+                    AssocItemId::TypeAliasId(_) => None,
                 }
-                AssocItemId::TypeAliasId(_) => None,
             })?;
         let def = match item {
             AssocItemId::FunctionId(f) => ValueNs::FunctionId(f),
@@ -298,7 +277,6 @@ impl InferenceContext<'_> {
         Some((def, trait_ref.substitution))
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
     fn resolve_ty_assoc_item(
         &mut self,
         ty: Ty,
@@ -350,10 +328,7 @@ impl InferenceContext<'_> {
                 let impl_substs = TyBuilder::subst_for_def(self.db, impl_id, None)
                     .fill_with_inference_vars(&mut self.table)
                     .build();
-                let impl_self_ty = self
-                    .db
-                    .impl_self_ty(impl_id)
-                    .substitute(Interner, &impl_substs);
+                let impl_self_ty = self.db.impl_self_ty(impl_id).substitute(Interner, &impl_substs);
                 self.unify(&impl_self_ty, &ty);
                 impl_substs
             }
@@ -392,10 +367,7 @@ impl InferenceContext<'_> {
         };
         let enum_data = self.db.enum_data(enum_id);
         let local_id = enum_data.variant(name)?;
-        let variant = EnumVariantId {
-            parent: enum_id,
-            local_id,
-        };
+        let variant = EnumVariantId { parent: enum_id, local_id };
         self.write_variant_resolution(id, variant.into());
         Some((ValueNs::EnumVariantId(variant), subst.clone()))
     }
