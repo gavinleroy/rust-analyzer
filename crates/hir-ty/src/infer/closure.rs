@@ -67,24 +67,17 @@ impl InferenceContext<'_> {
     fn deduce_sig_from_dyn_ty(&self, dyn_ty: &DynTy) -> Option<FnPointer> {
         // Search for a predicate like `<$self as FnX<Args>>::Output == Ret`
 
-        let fn_traits: SmallVec<[ChalkTraitId; 3]> = utils::fn_traits(
-            self.db.upcast(),
-            self.owner.module(self.db.upcast()).krate(),
-        )
-        .map(to_chalk_trait_id)
-        .collect();
+        let fn_traits: SmallVec<[ChalkTraitId; 3]> =
+            utils::fn_traits(self.db.upcast(), self.owner.module(self.db.upcast()).krate())
+                .map(to_chalk_trait_id)
+                .collect();
 
         let self_ty = self.result.standard_types.unknown.clone();
-        let bounds = dyn_ty
-            .bounds
-            .clone()
-            .substitute(Interner, &[self_ty.cast(Interner)]);
+        let bounds = dyn_ty.bounds.clone().substitute(Interner, &[self_ty.cast(Interner)]);
         for bound in bounds.iter(Interner) {
             // NOTE(skip_binders): the extracted types are rebound by the returned `FnPointer`
-            if let WhereClause::AliasEq(AliasEq {
-                alias: AliasTy::Projection(projection),
-                ty,
-            }) = bound.skip_binders()
+            if let WhereClause::AliasEq(AliasEq { alias: AliasTy::Projection(projection), ty }) =
+                bound.skip_binders()
             {
                 let assoc_data = self.db.associated_ty_data(projection.associated_ty_id);
                 if !fn_traits.contains(&assoc_data.trait_id) {
@@ -104,11 +97,7 @@ impl InferenceContext<'_> {
                     cov_mark::hit!(dyn_fn_param_informs_call_site_closure_signature);
                     return Some(FnPointer {
                         num_binders: bound.len(Interner),
-                        sig: FnSig {
-                            abi: (),
-                            safety: chalk_ir::Safety::Safe,
-                            variadic: false,
-                        },
+                        sig: FnSig { abi: (), safety: chalk_ir::Safety::Safe, variadic: false },
                         substitution: FnSubst(Substitution::from_iter(Interner, sig_tys)),
                     });
                 }
@@ -180,9 +169,7 @@ impl CapturedItem {
     }
 
     pub fn ty(&self, subst: &Substitution) -> Ty {
-        self.ty
-            .clone()
-            .substitute(Interner, utils::ClosureSubst(subst).parent_subst())
+        self.ty.clone().substitute(Interner, utils::ClosureSubst(subst).parent_subst())
     }
 
     pub fn kind(&self) -> CaptureKind {
@@ -315,14 +302,8 @@ impl CapturedItemWithoutTy {
             let Some(generic_def) = owner.as_generic_def_id() else {
                 return Binders::empty(Interner, ty);
             };
-            let filler = &mut Filler {
-                db,
-                generics: generics(db.upcast(), generic_def),
-            };
-            let result = ty
-                .clone()
-                .try_fold_with(filler, DebruijnIndex::INNERMOST)
-                .unwrap_or(ty);
+            let filler = &mut Filler { db, generics: generics(db.upcast(), generic_def) };
+            let result = ty.clone().try_fold_with(filler, DebruijnIndex::INNERMOST).unwrap_or(ty);
             make_binders(db, &filler.generics, result)
         }
     }
@@ -332,11 +313,7 @@ impl InferenceContext<'_> {
     fn place_of_expr(&mut self, tgt_expr: ExprId) -> Option<HirPlace> {
         let r = self.place_of_expr_without_adjust(tgt_expr)?;
         let default = vec![];
-        let adjustments = self
-            .result
-            .expr_adjustments
-            .get(&tgt_expr)
-            .unwrap_or(&default);
+        let adjustments = self.result.expr_adjustments.get(&tgt_expr).unwrap_or(&default);
         apply_adjusts_to_place(r, adjustments)
     }
 
@@ -347,10 +324,7 @@ impl InferenceContext<'_> {
                 if let Some(r) = resolver.resolve_path_in_value_ns(self.db.upcast(), p) {
                     if let ResolveValueResult::ValueNs(v, _) = r {
                         if let ValueNs::LocalBinding(b) = v {
-                            return Some(HirPlace {
-                                local: b,
-                                projections: vec![],
-                            });
+                            return Some(HirPlace { local: b, projections: vec![] });
                         }
                     }
                 }
@@ -359,19 +333,14 @@ impl InferenceContext<'_> {
                 let mut place = self.place_of_expr(*expr)?;
                 if let TyKind::Tuple(..) = self.expr_ty(*expr).kind(Interner) {
                     let index = name.as_tuple_index()?;
-                    place
-                        .projections
-                        .push(ProjectionElem::TupleOrClosureField(index))
+                    place.projections.push(ProjectionElem::TupleOrClosureField(index))
                 } else {
                     let field = self.result.field_resolution(tgt_expr)?;
                     place.projections.push(ProjectionElem::Field(field));
                 }
                 return Some(place);
             }
-            Expr::UnaryOp {
-                expr,
-                op: UnaryOp::Deref,
-            } => {
+            Expr::UnaryOp { expr, op: UnaryOp::Deref } => {
                 if matches!(
                     self.expr_ty_after_adjustments(*expr).kind(Interner),
                     TyKind::Ref(..) | TyKind::Raw(..)
@@ -407,9 +376,7 @@ impl InferenceContext<'_> {
         if let Some(place) = self.place_of_expr(expr) {
             self.add_capture(
                 place,
-                CaptureKind::ByRef(BorrowKind::Mut {
-                    allow_two_phase_borrow: false,
-                }),
+                CaptureKind::ByRef(BorrowKind::Mut { allow_two_phase_borrow: false }),
                 expr.into(),
             );
         }
@@ -458,9 +425,9 @@ impl InferenceContext<'_> {
 
     fn ref_capture_with_adjusts(&mut self, m: Mutability, tgt_expr: ExprId, rest: &[Adjustment]) {
         let capture_kind = match m {
-            Mutability::Mut => CaptureKind::ByRef(BorrowKind::Mut {
-                allow_two_phase_borrow: false,
-            }),
+            Mutability::Mut => {
+                CaptureKind::ByRef(BorrowKind::Mut { allow_two_phase_borrow: false })
+            }
             Mutability::Not => CaptureKind::ByRef(BorrowKind::Shared),
         };
         if let Some(place) = self.place_of_expr_without_adjust(tgt_expr) {
@@ -485,34 +452,19 @@ impl InferenceContext<'_> {
 
     fn walk_expr_without_adjust(&mut self, tgt_expr: ExprId) {
         match &self.body[tgt_expr] {
-            Expr::If {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
+            Expr::If { condition, then_branch, else_branch } => {
                 self.consume_expr(*condition);
                 self.consume_expr(*then_branch);
                 if let &Some(expr) = else_branch {
                     self.consume_expr(expr);
                 }
             }
-            Expr::Async {
-                statements, tail, ..
-            }
-            | Expr::Unsafe {
-                statements, tail, ..
-            }
-            | Expr::Block {
-                statements, tail, ..
-            } => {
+            Expr::Async { statements, tail, .. }
+            | Expr::Unsafe { statements, tail, .. }
+            | Expr::Block { statements, tail, .. } => {
                 for s in statements.iter() {
                     match s {
-                        Statement::Let {
-                            pat,
-                            type_ref: _,
-                            initializer,
-                            else_branch,
-                        } => {
+                        Statement::Let { pat, type_ref: _, initializer, else_branch } => {
                             if let Some(else_branch) = else_branch {
                                 self.consume_expr(*else_branch);
                                 if let Some(initializer) = initializer {
@@ -583,10 +535,7 @@ impl InferenceContext<'_> {
                 self.consume_exprs(fields.iter().map(|it| it.expr));
             }
             Expr::Field { expr, name: _ } => self.select_from_expr(*expr),
-            Expr::UnaryOp {
-                expr,
-                op: UnaryOp::Deref,
-            } => {
+            Expr::UnaryOp { expr, op: UnaryOp::Deref } => {
                 if matches!(
                     self.expr_ty_after_adjustments(*expr).kind(Interner),
                     TyKind::Ref(..) | TyKind::Raw(..)
@@ -597,10 +546,8 @@ impl InferenceContext<'_> {
                         if let Some(deref_trait) =
                             self.resolve_lang_item(LangItem::DerefMut).and_then(|it| it.as_trait())
                         {
-                            if let Some(deref_fn) = self
-                                .db
-                                .trait_data(deref_trait)
-                                .method_by_name(&name![deref_mut])
+                            if let Some(deref_fn) =
+                                self.db.trait_data(deref_trait).method_by_name(&name![deref_mut])
                             {
                                 break 'b deref_fn == f;
                             }
@@ -617,25 +564,15 @@ impl InferenceContext<'_> {
                 }
             }
             Expr::UnaryOp { expr, op: _ }
-            | Expr::Array(Array::Repeat {
-                initializer: expr,
-                repeat: _,
-            })
+            | Expr::Array(Array::Repeat { initializer: expr, repeat: _ })
             | Expr::Await { expr }
-            | Expr::Loop {
-                body: expr,
-                label: _,
-            }
+            | Expr::Loop { body: expr, label: _ }
             | Expr::Let { pat: _, expr }
             | Expr::Box { expr }
             | Expr::Cast { expr, type_ref: _ } => {
                 self.consume_expr(*expr);
             }
-            Expr::Ref {
-                expr,
-                rawness: _,
-                mutability,
-            } => match mutability {
+            Expr::Ref { expr, rawness: _, mutability } => match mutability {
                 hir_def::type_ref::Mutability::Shared => self.ref_expr(*expr),
                 hir_def::type_ref::Mutability::Mut => self.mutate_expr(*expr),
             },
@@ -651,11 +588,7 @@ impl InferenceContext<'_> {
                 self.consume_expr(*lhs);
                 self.consume_expr(*rhs);
             }
-            Expr::Range {
-                lhs,
-                rhs,
-                range_type: _,
-            } => {
+            Expr::Range { lhs, rhs, range_type: _ } => {
                 if let &Some(expr) = lhs {
                     self.consume_expr(expr);
                 }
@@ -683,14 +616,10 @@ impl InferenceContext<'_> {
                 }));
                 self.current_captures = cc;
             }
-            Expr::Array(Array::ElementList {
-                elements: exprs,
-                is_assignee_expr: _,
-            })
-            | Expr::Tuple {
-                exprs,
-                is_assignee_expr: _,
-            } => self.consume_exprs(exprs.iter().copied()),
+            Expr::Array(Array::ElementList { elements: exprs, is_assignee_expr: _ })
+            | Expr::Tuple { exprs, is_assignee_expr: _ } => {
+                self.consume_exprs(exprs.iter().copied())
+            }
             Expr::Missing
             | Expr::Continue { .. }
             | Expr::Path(_)
@@ -711,9 +640,7 @@ impl InferenceContext<'_> {
         self.walk_pat_inner(
             pat,
             &mut update_result,
-            BorrowKind::Mut {
-                allow_two_phase_borrow: false,
-            },
+            BorrowKind::Mut { allow_two_phase_borrow: false },
         );
     }
 
@@ -766,8 +693,7 @@ impl InferenceContext<'_> {
         if self.result.pat_adjustments.get(&p).map_or(false, |it| !it.is_empty()) {
             for_mut = BorrowKind::Unique;
         }
-        self.body
-            .walk_pats_shallow(p, |p| self.walk_pat_inner(p, update_result, for_mut));
+        self.body.walk_pats_shallow(p, |p| self.walk_pat_inner(p, update_result, for_mut));
     }
 
     fn expr_ty(&self, expr: ExprId) -> Ty {
@@ -799,9 +725,7 @@ impl InferenceContext<'_> {
             // without creating query cycles.
             return self.result.closure_info.get(id).map(|it| it.1 == FnTrait::Fn).unwrap_or(true);
         }
-        self.table
-            .resolve_completely(ty)
-            .is_copy(self.db, self.owner)
+        self.table.resolve_completely(ty).is_copy(self.db, self.owner)
     }
 
     fn select_from_expr(&mut self, expr: ExprId) {
@@ -810,11 +734,8 @@ impl InferenceContext<'_> {
 
     fn adjust_for_move_closure(&mut self) {
         for capture in &mut self.current_captures {
-            if let Some(first_deref) = capture
-                .place
-                .projections
-                .iter()
-                .position(|proj| *proj == ProjectionElem::Deref)
+            if let Some(first_deref) =
+                capture.place.projections.iter().position(|proj| *proj == ProjectionElem::Deref)
             {
                 capture.place.projections.truncate(first_deref);
             }
@@ -827,10 +748,7 @@ impl InferenceContext<'_> {
         let mut hash_map = HashMap::<HirPlace, usize>::new();
         let result = mem::take(&mut self.current_captures);
         for item in result {
-            let mut lookup_place = HirPlace {
-                local: item.place.local,
-                projections: vec![],
-            };
+            let mut lookup_place = HirPlace { local: item.place.local, projections: vec![] };
             let mut it = item.place.projections.iter();
             let prev_index = loop {
                 if let Some(k) = hash_map.get(&lookup_place) {
@@ -875,10 +793,7 @@ impl InferenceContext<'_> {
                     _ => return,
                 };
                 let fields = 0..field_count;
-                let it = al
-                    .iter()
-                    .zip(fields.clone())
-                    .chain(ar.iter().rev().zip(fields.rev()));
+                let it = al.iter().zip(fields.clone()).chain(ar.iter().rev().zip(fields.rev()));
                 for (arg, i) in it {
                     let mut p = place.clone();
                     p.projections.push(ProjectionElem::TupleOrClosureField(i));
@@ -928,17 +843,13 @@ impl InferenceContext<'_> {
                         return;
                     }
                     BindingMode::Ref(Mutability::Not) => BorrowKind::Shared,
-                    BindingMode::Ref(Mutability::Mut) => BorrowKind::Mut {
-                        allow_two_phase_borrow: false,
-                    },
+                    BindingMode::Ref(Mutability::Mut) => {
+                        BorrowKind::Mut { allow_two_phase_borrow: false }
+                    }
                 };
                 self.add_capture(place, CaptureKind::ByRef(capture_kind), pat.into());
             }
-            Pat::TupleStruct {
-                path: _,
-                args,
-                ellipsis,
-            } => {
+            Pat::TupleStruct { path: _, args, ellipsis } => {
                 let Some(variant) = self.result.variant_resolution_for_pat(pat) else {
                     return;
                 };
@@ -950,10 +861,8 @@ impl InferenceContext<'_> {
                         let vd = &*self.db.struct_data(s).variant_data;
                         let (al, ar) = args.split_at(ellipsis.unwrap_or(args.len()));
                         let fields = vd.fields().iter();
-                        let it = al
-                            .iter()
-                            .zip(fields.clone())
-                            .chain(ar.iter().rev().zip(fields.rev()));
+                        let it =
+                            al.iter().zip(fields.clone()).chain(ar.iter().rev().zip(fields.rev()));
                         for (arg, (i, _)) in it {
                             let mut p = place.clone();
                             p.projections.push(ProjectionElem::Field(FieldId {
@@ -1009,9 +918,7 @@ impl InferenceContext<'_> {
             {
                 // FIXME: remove the `mutated_bindings_in_closure` completely and add proper fake reads in
                 // MIR. I didn't do that due duplicate diagnostics.
-                self.result
-                    .mutated_bindings_in_closure
-                    .insert(item.place.local);
+                self.result.mutated_bindings_in_closure.insert(item.place.local);
             }
         }
         // closure_kind should be done before adjust_for_move_closure
@@ -1035,11 +942,8 @@ impl InferenceContext<'_> {
 
             for (derefed_callee, callee_ty, params, expr) in exprs {
                 if let &Expr::Call { callee, .. } = &self.body[expr] {
-                    let mut adjustments = self
-                        .result
-                        .expr_adjustments
-                        .remove(&callee)
-                        .unwrap_or_default();
+                    let mut adjustments =
+                        self.result.expr_adjustments.remove(&callee).unwrap_or_default();
                     self.write_fn_trait_method_resolution(
                         kind,
                         &derefed_callee,

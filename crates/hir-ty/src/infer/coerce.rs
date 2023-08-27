@@ -47,10 +47,7 @@ fn success(
     target: Ty,
     goals: Vec<InEnvironment<Goal<Interner>>>,
 ) -> CoerceResult {
-    Ok(InferOk {
-        goals,
-        value: (adj, target),
-    })
+    Ok(InferOk { goals, value: (adj, target) })
 }
 
 pub(super) enum CoercionCause {
@@ -69,11 +66,7 @@ pub(super) struct CoerceMany {
 
 impl CoerceMany {
     pub(super) fn new(expected: Ty) -> Self {
-        CoerceMany {
-            expected_ty: expected,
-            final_ty: None,
-            expressions: vec![],
-        }
+        CoerceMany { expected_ty: expected, final_ty: None, expressions: vec![] }
     }
 
     /// Returns the "expected type" with which this coercion was
@@ -93,9 +86,7 @@ impl CoerceMany {
     /// isn't *final* until you call `self.complete()`, which will return
     /// the merged type.
     pub(super) fn merged_ty(&self) -> Ty {
-        self.final_ty
-            .clone()
-            .unwrap_or_else(|| self.expected_ty.clone())
+        self.final_ty.clone().unwrap_or_else(|| self.expected_ty.clone())
     }
 
     pub(super) fn complete(self, ctx: &mut InferenceContext<'_>) -> Ty {
@@ -141,10 +132,8 @@ impl CoerceMany {
                 // FIXME: we're ignoring safety here. To be more correct, if we have one FnDef and one Closure,
                 // we should be coercing the closure to a fn pointer of the safety of the FnDef
                 cov_mark::hit!(coerce_fn_reification);
-                let sig = self
-                    .merged_ty()
-                    .callable_sig(ctx.db)
-                    .expect("FnDef without callable sig");
+                let sig =
+                    self.merged_ty().callable_sig(ctx.db).expect("FnDef without callable sig");
                 Some(sig)
             }
             _ => None,
@@ -154,17 +143,11 @@ impl CoerceMany {
             let result1 = ctx.table.coerce_inner(self.merged_ty(), &target_ty);
             let result2 = ctx.table.coerce_inner(expr_ty.clone(), &target_ty);
             if let (Ok(result1), Ok(result2)) = (result1, result2) {
-                ctx.table.register_infer_ok(InferOk {
-                    value: (),
-                    goals: result1.goals,
-                });
+                ctx.table.register_infer_ok(InferOk { value: (), goals: result1.goals });
                 for &e in &self.expressions {
                     ctx.write_expr_adj(e, result1.value.0.clone());
                 }
-                ctx.table.register_infer_ok(InferOk {
-                    value: (),
-                    goals: result2.goals,
-                });
+                ctx.table.register_infer_ok(InferOk { value: (), goals: result2.goals });
                 if let Some(expr) = expr {
                     ctx.write_expr_adj(expr, result2.value.0);
                     self.expressions.push(expr);
@@ -186,10 +169,7 @@ impl CoerceMany {
                 CoercionCause::Expr(id) => {
                     ctx.result.type_mismatches.insert(
                         id.into(),
-                        TypeMismatch {
-                            expected: self.merged_ty(),
-                            actual: expr_ty.clone(),
-                        },
+                        TypeMismatch { expected: self.merged_ty(), actual: expr_ty.clone() },
                     );
                 }
             }
@@ -229,19 +209,12 @@ pub(crate) fn coerce(
         } == Some(iv))
     };
     let fallback = |iv, kind, default, binder| match kind {
-        chalk_ir::VariableKind::Ty(_ty_kind) => find_var(iv).map_or(default, |i| {
-            BoundVar::new(binder, i).to_ty(Interner).cast(Interner)
-        }),
-        chalk_ir::VariableKind::Lifetime => find_var(iv).map_or(default, |i| {
-            BoundVar::new(binder, i)
-                .to_lifetime(Interner)
-                .cast(Interner)
-        }),
-        chalk_ir::VariableKind::Const(ty) => find_var(iv).map_or(default, |i| {
-            BoundVar::new(binder, i)
-                .to_const(Interner, ty)
-                .cast(Interner)
-        }),
+        chalk_ir::VariableKind::Ty(_ty_kind) => find_var(iv)
+            .map_or(default, |i| BoundVar::new(binder, i).to_ty(Interner).cast(Interner)),
+        chalk_ir::VariableKind::Lifetime => find_var(iv)
+            .map_or(default, |i| BoundVar::new(binder, i).to_lifetime(Interner).cast(Interner)),
+        chalk_ir::VariableKind::Const(ty) => find_var(iv)
+            .map_or(default, |i| BoundVar::new(binder, i).to_const(Interner, ty).cast(Interner)),
     };
     // FIXME also map the types in the adjustments
     Ok((adjustments, table.resolve_with_fallback(ty, &fallback)))
@@ -277,10 +250,7 @@ impl InferenceTable<'_> {
         let from_ty = self.resolve_ty_shallow(from_ty);
         let to_ty = self.resolve_ty_shallow(to_ty);
         match self.coerce_inner(from_ty, &to_ty) {
-            Ok(InferOk {
-                value: (adjustments, ty),
-                goals,
-            }) => {
+            Ok(InferOk { value: (adjustments, ty), goals }) => {
                 self.register_infer_ok(InferOk { value: (), goals });
                 Ok((adjustments, ty))
             }
@@ -303,11 +273,7 @@ impl InferenceTable<'_> {
             if let TyKind::InferenceVar(tv, TyVariableKind::General) = to_ty.kind(Interner) {
                 self.set_diverging(*tv, true);
             }
-            return success(
-                simple(Adjust::NeverToAny)(to_ty.clone()),
-                to_ty.clone(),
-                vec![],
-            );
+            return success(simple(Adjust::NeverToAny)(to_ty.clone()), to_ty.clone(), vec![]);
         }
 
         // Consider coercing the subtype to a DST
@@ -376,14 +342,8 @@ impl InferenceTable<'_> {
         if is_ref {
             self.unify_and(&from_raw, to_ty, |target| {
                 vec![
-                    Adjustment {
-                        kind: Adjust::Deref(None),
-                        target: from_inner.clone(),
-                    },
-                    Adjustment {
-                        kind: Adjust::Borrow(AutoBorrow::RawPtr(to_mt)),
-                        target,
-                    },
+                    Adjustment { kind: Adjust::Deref(None), target: from_inner.clone() },
+                    Adjustment { kind: Adjust::Borrow(AutoBorrow::RawPtr(to_mt)), target },
                 ]
             })
         } else if *from_mt != to_mt {
@@ -495,10 +455,8 @@ impl InferenceTable<'_> {
         }
 
         let mut adjustments = auto_deref_adjust_steps(&autoderef);
-        adjustments.push(Adjustment {
-            kind: Adjust::Borrow(AutoBorrow::Ref(to_mt)),
-            target: ty.clone(),
-        });
+        adjustments
+            .push(Adjustment { kind: Adjust::Borrow(AutoBorrow::Ref(to_mt)), target: ty.clone() });
 
         success(adjustments, ty, goals)
     }
@@ -648,10 +606,7 @@ impl InferenceTable<'_> {
 
                 let lt = static_lifetime();
                 Some((
-                    Adjustment {
-                        kind: Adjust::Deref(None),
-                        target: from_inner.clone(),
-                    },
+                    Adjustment { kind: Adjust::Deref(None), target: from_inner.clone() },
                     Adjustment {
                         kind: Adjust::Borrow(AutoBorrow::Ref(to_mt)),
                         target: TyKind::Ref(to_mt, lt, from_inner.clone()).intern(Interner),
@@ -662,10 +617,7 @@ impl InferenceTable<'_> {
                 coerce_mutabilities(*from_mt, to_mt)?;
 
                 Some((
-                    Adjustment {
-                        kind: Adjust::Deref(None),
-                        target: from_inner.clone(),
-                    },
+                    Adjustment { kind: Adjust::Deref(None), target: from_inner.clone() },
                     Adjustment {
                         kind: Adjust::Borrow(AutoBorrow::RawPtr(to_mt)),
                         target: TyKind::Raw(to_mt, from_inner.clone()).intern(Interner),
@@ -674,9 +626,8 @@ impl InferenceTable<'_> {
             }
             _ => None,
         };
-        let coerce_from = reborrow
-            .as_ref()
-            .map_or_else(|| from_ty.clone(), |(_, adj)| adj.target.clone());
+        let coerce_from =
+            reborrow.as_ref().map_or_else(|| from_ty.clone(), |(_, adj)| adj.target.clone());
 
         let krate = self.trait_env.krate;
         let coerce_unsized_trait = match self.db.lang_item(krate, LangItem::CoerceUnsized) {
@@ -704,11 +655,7 @@ impl InferenceTable<'_> {
         // Need to find out in what cases this is necessary
         let solution = self
             .db
-            .trait_solve(
-                krate,
-                self.trait_env.block,
-                canonicalized.value.clone().cast(Interner),
-            )
+            .trait_solve(krate, self.trait_env.block, canonicalized.value.clone().cast(Interner))
             .ok_or(TypeError)?;
 
         match solution {
@@ -729,10 +676,8 @@ impl InferenceTable<'_> {
             // FIXME actually we maybe should also accept unknown guidance here
             _ => return Err(TypeError),
         };
-        let unsize = Adjustment {
-            kind: Adjust::Pointer(PointerCast::Unsize),
-            target: to_ty.clone(),
-        };
+        let unsize =
+            Adjustment { kind: Adjust::Pointer(PointerCast::Unsize), target: to_ty.clone() };
         let adjustments = match reborrow {
             None => vec![unsize],
             Some((deref, autoref)) => vec![deref, autoref, unsize],
@@ -746,10 +691,7 @@ fn coerce_closure_fn_ty(closure_substs: &Substitution, safety: chalk_ir::Safety)
     match closure_sig.kind(Interner) {
         TyKind::Function(fn_ty) => TyKind::Function(FnPointer {
             num_binders: fn_ty.num_binders,
-            sig: FnSig {
-                safety,
-                ..fn_ty.sig
-            },
+            sig: FnSig { safety, ..fn_ty.sig },
             substitution: fn_ty.substitution.clone(),
         })
         .intern(Interner),
@@ -760,10 +702,7 @@ fn coerce_closure_fn_ty(closure_substs: &Substitution, safety: chalk_ir::Safety)
 fn safe_to_unsafe_fn_ty(fn_ty: FnPointer) -> FnPointer {
     FnPointer {
         num_binders: fn_ty.num_binders,
-        sig: FnSig {
-            safety: chalk_ir::Safety::Unsafe,
-            ..fn_ty.sig
-        },
+        sig: FnSig { safety: chalk_ir::Safety::Unsafe, ..fn_ty.sig },
         substitution: fn_ty.substitution,
     }
 }
@@ -778,11 +717,8 @@ fn coerce_mutabilities(from: Mutability, to: Mutability) -> Result<(), TypeError
 
 pub(super) fn auto_deref_adjust_steps(autoderef: &Autoderef<'_, '_>) -> Vec<Adjustment> {
     let steps = autoderef.steps();
-    let targets = steps
-        .iter()
-        .skip(1)
-        .map(|(_, ty)| ty.clone())
-        .chain(iter::once(autoderef.final_ty()));
+    let targets =
+        steps.iter().skip(1).map(|(_, ty)| ty.clone()).chain(iter::once(autoderef.final_ty()));
     steps
         .iter()
         .map(|(kind, _source)| match kind {
@@ -791,9 +727,6 @@ pub(super) fn auto_deref_adjust_steps(autoderef: &Autoderef<'_, '_>) -> Vec<Adju
             AutoderefKind::Builtin => None,
         })
         .zip(targets)
-        .map(|(autoderef, target)| Adjustment {
-            kind: Adjust::Deref(autoderef),
-            target,
-        })
+        .map(|(autoderef, target)| Adjustment { kind: Adjust::Deref(autoderef), target })
         .collect()
 }
