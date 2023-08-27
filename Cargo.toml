@@ -33,10 +33,6 @@ ts-rs = { git = "https://github.com/gavinleroy/ts-rs.git" }
 # chalk = { path = "../chalk" }
 # rowan = { path = "../rowan" }
 
-chalk-solve = { path = "../chalk/chalk-solve", features = ["tserialize"] }
-chalk-ir = { path = "../chalk/chalk-ir", features = ["tserialize"] }
-chalk-recursive = { path = "../chalk/chalk-recursive" }
-chalk-derive = { path = "../chalk/chalk-derive" }
 # line-index = { path = "lib/line-index" }
 # la-arena = { path = "lib/la-arena" }
 # lsp-server = { path = "lib/lsp-server" }
@@ -88,9 +84,18 @@ proc-macro-test = { path = "./crates/proc-macro-test" }
 line-index = { version = "0.1.0-pre.1" }
 la-arena = { version = "0.3.1" }
 lsp-server = { version = "0.7.3" }
-line-index = { version = "0.1.0-pre.1", path = "./lib/line-index" }
 
 argus = { path = "../crates/argus", version = "0.0.0" }
+
+# chalk-solve = { version = "0.92.0", default-features = false }
+# chalk-ir = "0.92.0"
+# chalk-recursive = { version = "0.92.0", default-features = false }
+# chalk-derive = "0.92.0"
+
+chalk-solve = { path = "../chalk/chalk-solve", features = ["tserialize"] }
+chalk-ir = { path = "../chalk/chalk-ir", features = ["tserialize"] }
+chalk-recursive = { path = "../chalk/chalk-recursive" }
+chalk-derive = { path = "../chalk/chalk-derive" } 
 
 # non-local crates
 smallvec = { version = "1.10.0", features = [

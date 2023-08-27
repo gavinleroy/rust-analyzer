@@ -181,7 +181,7 @@ pub(crate) struct InferenceTable<'a> {
 
     /// Double buffer used in [`Self::resolve_obligations_as_possible`] to cut down on
     /// temporary allocations.
-    resolve_obligations_buffer: Vec<Canonicalized<InEnvironment<Goal>>>,
+    resolve_obligations_buffer: Vec<(ObligationKey, Canonicalized<InEnvironment<Goal>>)>,
 
     /// XXX(gavinleroy): Used for the Argus `ProofTree`.
     pub(crate) tracked_obligations: ObligationTracker<'a>,
@@ -873,7 +873,21 @@ impl<'a> InferenceTable<'a> {
         }
     }
 
+    /// ---------------------------------------
     /// XXX(gavinleroy): used in Argus tracing.
+
+    #[cfg(test)]
+    fn trait_solve(
+        &mut self,
+        krate: base_db::CrateId,
+        block: Option<hir_def::BlockId>,
+        canonicalized: crate::Canonical<crate::InEnvironment<crate::Goal>>,
+        _key: Option<ObligationKey>,
+    ) -> Option<crate::Solution> {
+        self.db.trait_solve(krate, block, canonicalized)
+    }
+
+    #[cfg(not(test))]
     fn trait_solve(
         &mut self,
         krate: base_db::CrateId,
@@ -891,23 +905,20 @@ impl<'a> InferenceTable<'a> {
         // NOTE: this is where we actually store the proof tree. This uses a lot of memory
         // and makes the test grind to a halt. The quick HACK is to just not store the trees
         // when testing, though there should be a better way.
-
-        if !cfg!(test) {
-            if let Some(key) = key {
-                // If a key is given then this is part of an attempt to resolve a necessary goal.
-                self.tracked_obligations.tracked[key].push(traced);
-            } else {
-                // If an obligation key is not provided, then RA is trying to gain more
-                // information about a type, though it is not necessarily a requirement
-                // for the program to type-chekc.
-                let krate = self.trait_env.krate;
-                let block = self.trait_env.block;
-                self.tracked_obligations.other.push(super::TracedTraitQuery {
-                    krate,
-                    block,
-                    kind: super::AttemptKind::Try(traced),
-                });
-            }
+        if let Some(key) = key {
+            // If a key is given then this is part of an attempt to resolve a necessary goal.
+            self.tracked_obligations.tracked[key].push(traced);
+        } else {
+            // If an obligation key is not provided, then RA is trying to gain more
+            // information about a type, though it is not necessarily a requirement
+            // for the program to type-chekc.
+            let krate = self.trait_env.krate;
+            let block = self.trait_env.block;
+            self.tracked_obligations.other.push(super::TracedTraitQuery {
+                krate,
+                block,
+                kind: super::AttemptKind::Try(traced),
+            });
         }
 
         solution

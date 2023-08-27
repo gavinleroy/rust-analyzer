@@ -29,30 +29,6 @@ use crate::{
  *
  */
 
-#[allow(dead_code)]
-fn compare_formatting<T>(name: &str, value: T, ctxt: &DebugContext<'_, '_>)
-where
-    T: std::fmt::Debug + argus::utils::SexpExt<Interner> + DeepDebug,
-{
-    println!(
-        "{:?}",
-        debug::Fmt(|f| {
-            let mut local = ctxt.clone();
-
-            writeln!(f, "{}", name)?;
-            writeln!(f, "DEBUG: {:?}", value)?;
-
-            write!(f, "SEXP: ")?;
-            value.nfmt(f, ctxt.ir)?;
-            writeln!(f, "")?;
-
-            write!(f, "WRITE: ")?;
-            value.fmt_deep(f, &mut local)?;
-            writeln!(f, "")
-        })
-    );
-}
-
 macro_rules! deep {
     ($fmt:expr, $ctxt:expr, $($expr:expr),*) => {{
         $(
@@ -78,6 +54,31 @@ where
     pub db: &'a dyn HirDatabase,
     pub ir: &'a dyn RustIrDatabase<Interner>,
     pub mapping: FxHashMap<BoundVar, &'b str>,
+}
+
+
+#[allow(dead_code)]
+fn compare_formatting<T>(name: &str, value: T, ctxt: &DebugContext<'_, '_>)
+where
+    T: std::fmt::Debug + argus::utils::SexpExt<Interner> + DeepDebug,
+{
+    println!(
+        "{:?}",
+        debug::Fmt(|f| {
+            let mut local = ctxt.clone();
+
+            writeln!(f, "{}", name)?;
+            writeln!(f, "DEBUG: {:?}", value)?;
+
+            write!(f, "SEXP: ")?;
+            value.nfmt(f, ctxt.ir)?;
+            writeln!(f, "")?;
+
+            write!(f, "WRITE: ")?;
+            value.fmt_deep(f, &mut local)?;
+            writeln!(f, "")
+        })
+    );
 }
 
 impl<'a, 'b> DebugContext<'a, 'b> {

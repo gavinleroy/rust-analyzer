@@ -116,7 +116,6 @@ macro_rules! serialize_as_number {
     }
 }
 
-#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A `ModuleId` that is always a crate's root module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CrateRootModuleId {
@@ -174,7 +173,7 @@ impl TryFrom<ModuleId> for CrateRootModuleId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(TS, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleId {
     #[ts(skip)]
     #[serde(skip)]
@@ -625,8 +624,8 @@ impl_from!(
 
 /// Id of the anonymous const block expression and patterns. This is very similar to `ClosureId` and
 /// shouldn't be a `DefWithBodyId` since its type inference is dependent on its parent.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct ConstBlockId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct ConstBlockId(#[ts(type = "number")] salsa::InternId);
 impl_intern!(ConstBlockId, ConstBlockLoc, intern_anonymous_const, lookup_intern_anonymous_const);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -772,8 +771,8 @@ impl Clone for Box<dyn OpaqueInternableThing> {
 /// A constant in a type as a substitution for const generics (like `Foo<{ 2 + 2 }>`) or as an array
 /// length (like `[u8; 2 + 2]`). These constants are body owner and are a variant of `DefWithBodyId`. These
 /// are not called `AnonymousConstId` to prevent confusion with [`ConstBlockId`].
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct InTypeConstId(salsa::InternId);
+#[derive(TS, Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct InTypeConstId(#[ts(type = "number")] salsa::InternId);
 impl_intern!(InTypeConstId, InTypeConstLoc, intern_in_type_const, lookup_intern_in_type_const);
 
 #[derive(Debug, Hash, Eq, Clone)]
@@ -1459,9 +1458,12 @@ serialize_as_number!(
     TypeAliasId,
     ImplId,
     ExternBlockId,
+    ExternCrateId,
     Macro2Id,
     MacroRulesId,
     BlockId,
-    AnonymousConstId,
     ProcMacroId,
+    ConstBlockId,
+    InTypeConstId,
+    UseId,
 );

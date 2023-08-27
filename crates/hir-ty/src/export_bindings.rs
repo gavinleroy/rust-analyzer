@@ -205,7 +205,6 @@ fn export_ra_hir_def() {
       def::MacroId,
       def::GenericParamId,
       def::ModuleDefId,
-      def::AnonymousConstId,
       def::GeneralConstId,
       def::DefWithBodyId,
       def::AssocItemId,

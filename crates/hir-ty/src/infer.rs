@@ -72,14 +72,6 @@ pub use unify::could_unify;
 use cast::CastCheck;
 pub(crate) use self::closure::{CaptureKind, CapturedItem, CapturedItemWithoutTy};
 
-pub(crate) mod closure;
-mod coerce;
-mod expr;
-mod mutability;
-mod pat;
-mod path;
-pub(crate) mod unify;
-
 #[derive(Clone, Debug)]
 pub(crate) struct QueryAttempt<'a> {
     pub context: unify::InferenceTable<'a>,
