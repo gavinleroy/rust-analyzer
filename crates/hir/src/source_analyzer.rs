@@ -38,8 +38,8 @@ use hir_ty::{
         UnsafeExpr,
     },
     lang_items::lang_items_for_bin_op,
-    method_resolution::{self},
-    Adjustment, InferenceResult, Interner, Substitution, Ty, TyExt, TyKind, TyLoweringContext,
+    method_resolution, Adjustment, InferenceResult, Interner, Substitution, Ty, TyExt, TyKind,
+    TyLoweringContext,
 };
 use itertools::Itertools;
 use smallvec::SmallVec;
@@ -487,7 +487,7 @@ impl SourceAnalyzer {
         let path = macro_call.value.path().and_then(|ast| Path::from_src(ast, &ctx))?;
         self.resolver
             .resolve_path_as_macro(db.upcast(), path.mod_path()?, Some(MacroSubNs::Bang))
-            .map(|it| it.into())
+            .map(|(it, _)| it.into())
     }
 
     pub(crate) fn resolve_bind_pat_to_const(
@@ -760,7 +760,7 @@ impl SourceAnalyzer {
         let macro_call_id = macro_call.as_call_id(db.upcast(), krate, |path| {
             self.resolver
                 .resolve_path_as_macro(db.upcast(), &path, Some(MacroSubNs::Bang))
-                .map(|it| macro_id_to_def_id(db.upcast(), it))
+                .map(|(it, _)| macro_id_to_def_id(db.upcast(), it))
         })?;
         Some(macro_call_id.as_file()).filter(|it| it.expansion_level(db.upcast()) < 64)
     }
@@ -832,7 +832,7 @@ impl SourceAnalyzer {
             None => return func,
         };
         let env = db.trait_environment_for_body(owner);
-        method_resolution::lookup_impl_method(db, env, func, substs).0
+        db.lookup_impl_method(env, func, substs).0
     }
 
     fn resolve_impl_const_or_trait_def(
@@ -966,6 +966,7 @@ pub(crate) fn resolve_hir_path_as_attr_macro(
 ) -> Option<Macro> {
     resolver
         .resolve_path_as_macro(db.upcast(), path.mod_path()?, Some(MacroSubNs::Attr))
+        .map(|(it, _)| it)
         .map(Into::into)
 }
 
@@ -978,11 +979,12 @@ fn resolve_hir_path_(
     let types = || {
         let (ty, unresolved) = match path.type_anchor() {
             Some(type_ref) => {
-                let (_, res) = TyLoweringContext::new(db, resolver).lower_ty_ext(type_ref);
+                let (_, res) = TyLoweringContext::new(db, resolver, resolver.module().into())
+                    .lower_ty_ext(type_ref);
                 res.map(|ty_ns| (ty_ns, path.segments().first()))
             }
             None => {
-                let (ty, remaining_idx) = resolver.resolve_path_in_type_ns(db.upcast(), path)?;
+                let (ty, remaining_idx, _) = resolver.resolve_path_in_type_ns(db.upcast(), path)?;
                 match remaining_idx {
                     Some(remaining_idx) => {
                         if remaining_idx + 1 == path.segments().len() {
@@ -1066,7 +1068,7 @@ fn resolve_hir_path_(
     let macros = || {
         resolver
             .resolve_path_as_macro(db.upcast(), path.mod_path()?, None)
-            .map(|def| PathResolution::Def(ModuleDef::Macro(def.into())))
+            .map(|(def, _)| PathResolution::Def(ModuleDef::Macro(def.into())))
     };
 
     if prefer_value_ns { values().or_else(types) } else { types().or_else(values) }

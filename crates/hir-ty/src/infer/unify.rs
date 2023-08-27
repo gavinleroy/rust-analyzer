@@ -26,7 +26,7 @@ use crate::{
     TraitEnvironment, Ty, TyBuilder, TyExt, TyKind, VariableKind,
 };
 
-impl<'a> InferenceContext<'a> {
+impl InferenceContext<'_> {
     pub(super) fn canonicalize<T: TypeFoldable<Interner> + HasInterner<Interner = Interner>>(
         &mut self,
         t: T,
@@ -95,16 +95,11 @@ pub(crate) fn unify(
     let mut table = InferenceTable::new(db, env);
     let vars = Substitution::from_iter(
         Interner,
-        tys.binders.iter(Interner).map(|x| match &x.kind {
-            chalk_ir::VariableKind::Ty(_) => {
-                GenericArgData::Ty(table.new_type_var()).intern(Interner)
-            }
-            chalk_ir::VariableKind::Lifetime => {
-                GenericArgData::Ty(table.new_type_var()).intern(Interner)
-            } // FIXME: maybe wrong?
-            chalk_ir::VariableKind::Const(ty) => {
-                GenericArgData::Const(table.new_const_var(ty.clone())).intern(Interner)
-            }
+        tys.binders.iter(Interner).map(|it| match &it.kind {
+            chalk_ir::VariableKind::Ty(_) => table.new_type_var().cast(Interner),
+            // FIXME: maybe wrong?
+            chalk_ir::VariableKind::Lifetime => table.new_type_var().cast(Interner),
+            chalk_ir::VariableKind::Const(ty) => table.new_const_var(ty.clone()).cast(Interner),
         }),
     );
     let ty1_with_vars = vars.apply(tys.value.0.clone(), Interner);
@@ -115,10 +110,10 @@ pub(crate) fn unify(
     // default any type vars that weren't unified back to their original bound vars
     // (kind of hacky)
     let find_var = |iv| {
-        vars.iter(Interner).position(|v| match v.interned() {
-            chalk_ir::GenericArgData::Ty(ty) => ty.inference_var(Interner),
-            chalk_ir::GenericArgData::Lifetime(lt) => lt.inference_var(Interner),
-            chalk_ir::GenericArgData::Const(c) => c.inference_var(Interner),
+        vars.iter(Interner).position(|v| match v.data(Interner) {
+            GenericArgData::Ty(ty) => ty.inference_var(Interner),
+            GenericArgData::Lifetime(lt) => lt.inference_var(Interner),
+            GenericArgData::Const(c) => c.inference_var(Interner),
         } == Some(iv))
     };
     let fallback = |iv, kind, default, binder| match kind {
@@ -184,6 +179,10 @@ pub(crate) struct InferenceTable<'a> {
     type_variable_table: Vec<TypeVariableFlags>,
     pending_obligations: Vec<(ObligationKey, Canonicalized<InEnvironment<Goal>>)>,
 
+    /// Double buffer used in [`Self::resolve_obligations_as_possible`] to cut down on
+    /// temporary allocations.
+    resolve_obligations_buffer: Vec<Canonicalized<InEnvironment<Goal>>>,
+
     /// XXX(gavinleroy): Used for the Argus `ProofTree`.
     pub(crate) tracked_obligations: ObligationTracker<'a>,
 }
@@ -203,6 +202,7 @@ impl<'a> InferenceTable<'a> {
             type_variable_table: Vec::new(),
             pending_obligations: Vec::new(),
             tracked_obligations: ObligationTracker::default(),
+            resolve_obligations_buffer: Vec::new(),
         }
     }
 
@@ -291,7 +291,8 @@ impl<'a> InferenceTable<'a> {
                             // and registering an obligation. But it needs chalk support, so we handle the most basic
                             // case (a non associated const without generic parameters) manually.
                             if subst.len(Interner) == 0 {
-                                if let Ok(eval) = self.db.const_eval((*c_id).into(), subst.clone())
+                                if let Ok(eval) =
+                                    self.db.const_eval((*c_id).into(), subst.clone(), None)
                                 {
                                     eval
                                 } else {
@@ -575,9 +576,8 @@ impl<'a> InferenceTable<'a> {
     pub(crate) fn resolve_obligations_as_possible(&mut self) {
         let _span = profile::span("resolve_obligations_as_possible");
         let mut changed = true;
-        let mut obligations = Vec::new();
-        while changed {
-            changed = false;
+        let mut obligations = mem::take(&mut self.resolve_obligations_buffer);
+        while mem::take(&mut changed) {
             mem::swap(&mut self.pending_obligations, &mut obligations);
             for (key, canonicalized) in obligations.drain(..) {
                 if !self.check_changed(&canonicalized) {
@@ -593,6 +593,8 @@ impl<'a> InferenceTable<'a> {
                 self.register_obligation_in_env(uncanonical, Some(key));
             }
         }
+        self.resolve_obligations_buffer = obligations;
+        self.resolve_obligations_buffer.clear();
     }
 
     pub(crate) fn fudge_inference<T: TypeFoldable<Interner>>(
@@ -607,7 +609,7 @@ impl<'a> InferenceTable<'a> {
             table: &'a mut InferenceTable<'b>,
             highest_known_var: InferenceVar,
         }
-        impl<'a, 'b> TypeFolder<Interner> for VarFudger<'a, 'b> {
+        impl TypeFolder<Interner> for VarFudger<'_, '_> {
             fn as_dyn(&mut self) -> &mut dyn TypeFolder<Interner, Error = Self::Error> {
                 self
             }
@@ -670,9 +672,9 @@ impl<'a> InferenceTable<'a> {
     fn check_changed(&mut self, canonicalized: &Canonicalized<InEnvironment<Goal>>) -> bool {
         canonicalized.free_vars.iter().any(|var| {
             let iv = match var.data(Interner) {
-                chalk_ir::GenericArgData::Ty(ty) => ty.inference_var(Interner),
-                chalk_ir::GenericArgData::Lifetime(lt) => lt.inference_var(Interner),
-                chalk_ir::GenericArgData::Const(c) => c.inference_var(Interner),
+                GenericArgData::Ty(ty) => ty.inference_var(Interner),
+                GenericArgData::Lifetime(lt) => lt.inference_var(Interner),
+                GenericArgData::Const(c) => c.inference_var(Interner),
             }
             .expect("free var is not inference var");
             if self.var_unification_table.probe_var(iv).is_some() {
@@ -755,17 +757,13 @@ impl<'a> InferenceTable<'a> {
 
         let mut arg_tys = vec![];
         let arg_ty = TyBuilder::tuple(num_args)
-            .fill(|x| {
-                let arg = match x {
+            .fill(|it| {
+                let arg = match it {
                     ParamKind::Type => self.new_type_var(),
-                    ParamKind::Const(ty) => {
-                        never!("Tuple with const parameter");
-                        return GenericArgData::Const(self.new_const_var(ty.clone()))
-                            .intern(Interner);
-                    }
+                    ParamKind::Const(_) => unreachable!("Tuple with const parameter"),
                 };
                 arg_tys.push(arg.clone());
-                GenericArgData::Ty(arg).intern(Interner)
+                arg.cast(Interner)
             })
             .build();
 
@@ -831,7 +829,7 @@ impl<'a> InferenceTable<'a> {
     {
         fold_tys_and_consts(
             ty,
-            |x, _| match x {
+            |it, _| match it {
                 Either::Left(ty) => Either::Left(self.insert_type_vars_shallow(ty)),
                 Either::Right(c) => Either::Right(self.insert_const_vars_shallow(c)),
             },
@@ -863,7 +861,7 @@ impl<'a> InferenceTable<'a> {
                 crate::ConstScalar::Unknown => self.new_const_var(data.ty.clone()),
                 // try to evaluate unevaluated const. Replace with new var if const eval failed.
                 crate::ConstScalar::UnevaluatedConst(id, subst) => {
-                    if let Ok(eval) = self.db.const_eval(*id, subst.clone()) {
+                    if let Ok(eval) = self.db.const_eval(*id, subst.clone(), None) {
                         eval
                     } else {
                         self.new_const_var(data.ty.clone())
@@ -916,7 +914,7 @@ impl<'a> InferenceTable<'a> {
     }
 }
 
-impl<'a> fmt::Debug for InferenceTable<'a> {
+impl fmt::Debug for InferenceTable<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("InferenceTable").field("num_vars", &self.type_variable_table.len()).finish()
     }
@@ -944,7 +942,7 @@ mod resolve {
         pub(super) var_stack: &'a mut Vec<InferenceVar>,
         pub(super) fallback: F,
     }
-    impl<'a, 'b, F> TypeFolder<Interner> for Resolver<'a, 'b, F>
+    impl<F> TypeFolder<Interner> for Resolver<'_, '_, F>
     where
         F: Fn(InferenceVar, VariableKind, GenericArg, DebruijnIndex) -> GenericArg,
     {

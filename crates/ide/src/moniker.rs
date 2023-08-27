@@ -99,7 +99,7 @@ pub(crate) fn moniker(
         });
     }
     let navs = sema
-        .descend_into_macros(original_token.clone())
+        .descend_into_macros(original_token.clone(), offset)
         .into_iter()
         .filter_map(|token| {
             IdentClass::classify_token(sema, &token).map(IdentClass::definitions_no_ops).map(|it| {
@@ -177,6 +177,17 @@ pub(crate) fn def_to_moniker(
         });
     }
 
+    // Qualify locals/parameters by their parent definition name.
+    if let Definition::Local(it) = def {
+        let parent_name = it.parent(db).name(db);
+        if let Some(name) = parent_name {
+            description.push(MonikerDescriptor {
+                name: name.display(db).to_string(),
+                desc: MonikerDescriptorKind::Method,
+            });
+        }
+    }
+
     let name_desc = match def {
         // These are handled by top-level guard (for performance).
         Definition::GenericParam(_)
@@ -246,6 +257,10 @@ pub(crate) fn def_to_moniker(
         Definition::Static(s) => MonikerDescriptor {
             name: s.name(db).display(db).to_string(),
             desc: MonikerDescriptorKind::Meta,
+        },
+        Definition::ExternCrateDecl(m) => MonikerDescriptor {
+            name: m.name(db).display(db).to_string(),
+            desc: MonikerDescriptorKind::Namespace,
         },
     };
 
@@ -320,7 +335,7 @@ use foo::module::func;
 fn main() {
     func$0();
 }
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub mod module {
     pub fn func() {}
 }
@@ -336,7 +351,7 @@ use foo::module::func;
 fn main() {
     func();
 }
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub mod module {
     pub fn func$0() {}
 }
@@ -351,7 +366,7 @@ pub mod module {
     fn moniker_for_trait() {
         check_moniker(
             r#"
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub mod module {
     pub trait MyTrait {
         pub fn func$0() {}
@@ -368,7 +383,7 @@ pub mod module {
     fn moniker_for_trait_constant() {
         check_moniker(
             r#"
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub mod module {
     pub trait MyTrait {
         const MY_CONST$0: u8;
@@ -385,7 +400,7 @@ pub mod module {
     fn moniker_for_trait_type() {
         check_moniker(
             r#"
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub mod module {
     pub trait MyTrait {
         type MyType$0;
@@ -402,7 +417,7 @@ pub mod module {
     fn moniker_for_trait_impl_function() {
         check_moniker(
             r#"
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub mod module {
     pub trait MyTrait {
         pub fn func() {}
@@ -430,7 +445,7 @@ use foo::St;
 fn main() {
     let x = St { a$0: 2 };
 }
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub struct St {
     pub a: i32,
 }
@@ -450,7 +465,7 @@ use foo::module::func;
 fn main() {
     func();
 }
-//- /foo/lib.rs crate:foo@CratesIo:0.1.0,https://a.b/foo.git
+//- /foo/lib.rs crate:foo@0.1.0,https://a.b/foo.git library
 pub mod module {
     pub fn func() {
         let x$0 = 2;

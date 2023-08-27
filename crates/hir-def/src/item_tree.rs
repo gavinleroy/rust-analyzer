@@ -46,7 +46,7 @@ use ast::{AstNode, HasName, StructKind};
 use base_db::CrateId;
 use either::Either;
 use hir_expand::{
-    ast_id_map::FileAstId,
+    ast_id_map::{AstIdNode, FileAstId},
     attrs::RawAttrs,
     hygiene::Hygiene,
     name::{name, AsName, Name},
@@ -64,11 +64,11 @@ use triomphe::Arc;
 use crate::{
     attr::Attrs,
     db::DefDatabase,
-    generics::GenericParams,
+    generics::{GenericParams, LifetimeParamData, TypeOrConstParamData},
     path::{path, AssociatedTypeBinding, GenericArgs, ImportAlias, ModPath, Path, PathKind},
     type_ref::{Mutability, TraitRef, TypeBound, TypeRef},
     visibility::RawVisibility,
-    BlockId,
+    BlockId, Lookup,
 };
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -101,7 +101,6 @@ pub struct ItemTree {
     top_level: SmallVec<[ModItem; 1]>,
     attrs: FxHashMap<AttrOwner, RawAttrs>,
 
-    // FIXME: Remove this indirection, an item tree is almost always non-empty?
     data: Option<Box<ItemTreeData>>,
 }
 
@@ -144,6 +143,16 @@ impl ItemTree {
         Arc::new(item_tree)
     }
 
+    pub(crate) fn block_item_tree_query(db: &dyn DefDatabase, block: BlockId) -> Arc<ItemTree> {
+        let loc = block.lookup(db);
+        let block = loc.ast_id.to_node(db.upcast());
+
+        let ctx = lower::Ctx::new(db, loc.ast_id.file_id);
+        let mut item_tree = ctx.lower_block(&block);
+        item_tree.shrink_to_fit();
+        Arc::new(item_tree)
+    }
+
     /// Returns an iterator over all items located at the top level of the `HirFileId` this
     /// `ItemTree` was created from.
     pub fn top_level_items(&self) -> &[ModItem] {
@@ -179,17 +188,10 @@ impl ItemTree {
         self.data.get_or_insert_with(Box::default)
     }
 
-    fn block_item_tree(db: &dyn DefDatabase, block: BlockId) -> Arc<ItemTree> {
-        let loc = db.lookup_intern_block(block);
-        let block = loc.ast_id.to_node(db.upcast());
-        let ctx = lower::Ctx::new(db, loc.ast_id.file_id);
-        Arc::new(ctx.lower_block(&block))
-    }
-
     fn shrink_to_fit(&mut self) {
         if let Some(data) = &mut self.data {
             let ItemTreeData {
-                imports,
+                uses,
                 extern_crates,
                 extern_blocks,
                 functions,
@@ -212,7 +214,7 @@ impl ItemTree {
                 vis,
             } = &mut **data;
 
-            imports.shrink_to_fit();
+            uses.shrink_to_fit();
             extern_crates.shrink_to_fit();
             extern_blocks.shrink_to_fit();
             functions.shrink_to_fit();
@@ -263,7 +265,7 @@ static VIS_PUB_CRATE: RawVisibility = RawVisibility::Module(ModPath::from_kind(P
 
 #[derive(Default, Debug, Eq, PartialEq)]
 struct ItemTreeData {
-    imports: Arena<Import>,
+    uses: Arena<Use>,
     extern_crates: Arena<ExternCrate>,
     extern_blocks: Arena<ExternBlock>,
     functions: Arena<Function>,
@@ -297,10 +299,12 @@ pub enum AttrOwner {
     Variant(Idx<Variant>),
     Field(Idx<Field>),
     Param(Idx<Param>),
+    TypeOrConstParamData(Idx<TypeOrConstParamData>),
+    LifetimeParamData(Idx<LifetimeParamData>),
 }
 
 macro_rules! from_attrs {
-    ( $( $var:ident($t:ty) ),+ ) => {
+    ( $( $var:ident($t:ty) ),+ $(,)? ) => {
         $(
             impl From<$t> for AttrOwner {
                 fn from(t: $t) -> AttrOwner {
@@ -311,11 +315,18 @@ macro_rules! from_attrs {
     };
 }
 
-from_attrs!(ModItem(ModItem), Variant(Idx<Variant>), Field(Idx<Field>), Param(Idx<Param>));
+from_attrs!(
+    ModItem(ModItem),
+    Variant(Idx<Variant>),
+    Field(Idx<Field>),
+    Param(Idx<Param>),
+    TypeOrConstParamData(Idx<TypeOrConstParamData>),
+    LifetimeParamData(Idx<LifetimeParamData>),
+);
 
 /// Trait implemented by all item nodes in the item tree.
 pub trait ItemTreeNode: Clone {
-    type Source: AstNode + Into<ast::Item>;
+    type Source: AstIdNode + Into<ast::Item>;
 
     fn ast_id(&self) -> FileAstId<Self::Source>;
 
@@ -374,7 +385,7 @@ impl TreeId {
 
     pub(crate) fn item_tree(&self, db: &dyn DefDatabase) -> Arc<ItemTree> {
         match self.block {
-            Some(block) => ItemTree::block_item_tree(db, block),
+            Some(block) => db.block_item_tree_query(block),
             None => db.file_item_tree(self.file),
         }
     }
@@ -487,7 +498,7 @@ macro_rules! mod_items {
 }
 
 mod_items! {
-    Import in imports -> ast::Use,
+    Use in uses -> ast::Use,
     ExternCrate in extern_crates -> ast::ExternCrate,
     ExternBlock in extern_blocks -> ast::ExternBlock,
     Function in functions -> ast::Fn,
@@ -542,7 +553,7 @@ impl<N: ItemTreeNode> Index<FileItemTreeId<N>> for ItemTree {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Import {
+pub struct Use {
     pub visibility: RawVisibilityId,
     pub ast_id: FileAstId<ast::Use>,
     pub use_tree: UseTree,
@@ -718,7 +729,6 @@ pub struct Mod {
 pub enum ModKind {
     /// `mod m { ... }`
     Inline { items: Box<[ModItem]> },
-
     /// `mod m;`
     Outline,
 }
@@ -746,7 +756,7 @@ pub struct MacroDef {
     pub ast_id: FileAstId<ast::MacroDef>,
 }
 
-impl Import {
+impl Use {
     /// Maps a `UseTree` contained in this import back to its AST node.
     pub fn use_tree_to_ast(
         &self,
@@ -762,6 +772,19 @@ impl Import {
         let (_, source_map) =
             lower::lower_use_tree(db, &hygiene, ast_use_tree).expect("failed to lower use tree");
         source_map[index].clone()
+    }
+    /// Maps a `UseTree` contained in this import back to its AST node.
+    pub fn use_tree_source_map(
+        &self,
+        db: &dyn DefDatabase,
+        file_id: HirFileId,
+    ) -> Arena<ast::UseTree> {
+        // Re-lower the AST item and get the source map.
+        // Note: The AST unwraps are fine, since if they fail we should have never obtained `index`.
+        let ast = InFile::new(file_id, self.ast_id).to_node(db.upcast());
+        let ast_use_tree = ast.use_tree().expect("missing `use_tree`");
+        let hygiene = Hygiene::new(db.upcast(), file_id);
+        lower::lower_use_tree(db, &hygiene, ast_use_tree).expect("failed to lower use tree").1
     }
 }
 
@@ -787,7 +810,7 @@ impl UseTree {
     fn expand_impl(
         &self,
         prefix: Option<ModPath>,
-        cb: &mut dyn FnMut(Idx<ast::UseTree>, ModPath, ImportKind, Option<ImportAlias>),
+        cb: &mut impl FnMut(Idx<ast::UseTree>, ModPath, ImportKind, Option<ImportAlias>),
     ) {
         fn concat_mod_paths(
             prefix: Option<ModPath>,
@@ -872,7 +895,7 @@ macro_rules! impl_froms {
 impl ModItem {
     pub fn as_assoc_item(&self) -> Option<AssocItem> {
         match self {
-            ModItem::Import(_)
+            ModItem::Use(_)
             | ModItem::ExternCrate(_)
             | ModItem::ExternBlock(_)
             | ModItem::Struct(_)
@@ -892,13 +915,9 @@ impl ModItem {
         }
     }
 
-    pub fn downcast<N: ItemTreeNode>(self) -> Option<FileItemTreeId<N>> {
-        N::id_from_mod_item(self)
-    }
-
     pub fn ast_id(&self, tree: &ItemTree) -> FileAstId<ast::Item> {
         match self {
-            ModItem::Import(it) => tree[it.index].ast_id().upcast(),
+            ModItem::Use(it) => tree[it.index].ast_id().upcast(),
             ModItem::ExternCrate(it) => tree[it.index].ast_id().upcast(),
             ModItem::ExternBlock(it) => tree[it.index].ast_id().upcast(),
             ModItem::Function(it) => tree[it.index].ast_id().upcast(),

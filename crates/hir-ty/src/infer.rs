@@ -13,6 +13,15 @@
 //! to certain types. To record this, we use the union-find implementation from
 //! the `ena` crate, which is extracted from rustc.
 
+mod cast;
+pub(crate) mod closure;
+mod coerce;
+mod expr;
+mod mutability;
+mod pat;
+mod path;
+pub(crate) mod unify;
+
 use std::{convert::identity, ops::Index};
 
 use chalk_ir::{
@@ -41,10 +50,15 @@ use stdx::{always, never};
 use triomphe::Arc;
 
 use crate::{
-    db::HirDatabase, fold_tys, infer::coerce::CoerceMany, lower::ImplTraitLoweringMode,
-    static_lifetime, to_assoc_type_id, traits::FnTrait, AliasEq, AliasTy, ClosureId, DomainGoal,
-    GenericArg, Goal, ImplTraitId, InEnvironment, Interner, ProjectionTy, RpitId, Substitution,
-    TraitEnvironment, TraitRef, Ty, TyBuilder, TyExt,
+    db::HirDatabase,
+    fold_tys,
+    infer::coerce::CoerceMany,
+    lower::ImplTraitLoweringMode,
+    static_lifetime, to_assoc_type_id,
+    traits::FnTrait,
+    utils::{InTypeConstIdMetadata, UnevaluatedConstEvaluatorFolder},
+    AliasEq, AliasTy, ClosureId, DomainGoal, GenericArg, Goal, ImplTraitId, InEnvironment,
+    Interner, ProjectionTy, RpitId, Substitution, TraitEnvironment, TraitRef, Ty, TyBuilder, TyExt,
 };
 
 // This lint has a false positive here. See the link below for details.
@@ -55,6 +69,7 @@ pub use coerce::could_coerce;
 #[allow(unreachable_pub)]
 pub use unify::could_unify;
 
+use cast::CastCheck;
 pub(crate) use self::closure::{CaptureKind, CapturedItem, CapturedItemWithoutTy};
 
 pub(crate) mod closure;
@@ -122,6 +137,16 @@ pub(crate) fn infer_query(db: &dyn HirDatabase, def: DefWithBodyId) -> Arc<Infer
                     }),
                 },
             });
+        }
+        DefWithBodyId::InTypeConstId(c) => {
+            // FIXME(const-generic-body): We should not get the return type in this way.
+            ctx.return_ty = c
+                .lookup(db.upcast())
+                .thing
+                .box_any()
+                .downcast::<InTypeConstIdMetadata>()
+                .unwrap()
+                .0;
         }
     }
 
@@ -302,7 +327,7 @@ impl Default for InternedStandardTypes {
 ///    ```
 ///
 ///    Note that for a struct, the 'deep' unsizing of the struct is not recorded.
-///    E.g., `struct Foo<T> { x: T }` we can coerce &Foo<[i32; 4]> to &Foo<[i32]>
+///    E.g., `struct Foo<T> { it: T }` we can coerce &Foo<[i32; 4]> to &Foo<[i32]>
 ///    The autoderef and -ref are the same as in the above example, but the type
 ///    stored in `unsize` is `Foo<[i32]>`, we don't store any further detail about
 ///    the underlying conversions from `[i32; 4]` to `[i32]`.
@@ -536,6 +561,8 @@ pub(crate) struct InferenceContext<'a> {
     diverges: Diverges,
     breakables: Vec<BreakableContext>,
 
+    deferred_cast_checks: Vec<CastCheck>,
+
     // fields related to closure capture
     current_captures: Vec<CapturedItemWithoutTy>,
     current_closure: Option<ClosureId>,
@@ -610,7 +637,8 @@ impl<'a> InferenceContext<'a> {
             resolver,
             diverges: Diverges::Maybe,
             breakables: Vec::new(),
-            current_captures: vec![],
+            deferred_cast_checks: Vec::new(),
+            current_captures: Vec::new(),
             current_closure: None,
             deferred_closures: FxHashMap::default(),
             closure_dependencies: FxHashMap::default(),
@@ -622,11 +650,7 @@ impl<'a> InferenceContext<'a> {
     // used this function for another workaround, mention it here. If you really need this function and believe that
     // there is no problem in it being `pub(crate)`, remove this comment.
     pub(crate) fn resolve_all(self) -> InferenceResult {
-        let InferenceContext {
-            mut table,
-            mut result,
-            ..
-        } = self;
+        let InferenceContext { mut table, mut result, deferred_cast_checks, .. } = self;
         // Destructure every single field so whenever new fields are added to `InferenceResult` we
         // don't forget to handle them here.
         let InferenceResult {
@@ -654,6 +678,13 @@ impl<'a> InferenceContext<'a> {
         } = &mut result;
 
         table.fallback_if_possible();
+
+        // Comment from rustc:
+        // Even though coercion casts provide type hints, we check casts after fallback for
+        // backwards compatibility. This makes fallback a stronger type hint than a cast coercion.
+        for cast in deferred_cast_checks {
+            cast.check(&mut table);
+        }
 
         // FIXME resolve obligations as well (use Guidance if necessary)
         table.resolve_obligations_as_possible();
@@ -764,7 +795,7 @@ impl<'a> InferenceContext<'a> {
 
     fn collect_fn(&mut self, func: FunctionId) {
         let data = self.db.function_data(func);
-        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver)
+        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, func.into())
             .with_impl_trait_mode(ImplTraitLoweringMode::Param);
         let mut param_tys = data
             .params
@@ -791,7 +822,7 @@ impl<'a> InferenceContext<'a> {
         }
         let return_ty = &*data.ret_type;
 
-        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver)
+        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, self.owner.into())
             .with_impl_trait_mode(ImplTraitLoweringMode::Opaque);
         let return_ty = ctx.lower_ty(return_ty);
         let return_ty = self.insert_type_vars(return_ty);
@@ -910,7 +941,7 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn make_ty(&mut self, type_ref: &TypeRef) -> Ty {
-        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver);
+        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, self.owner.into());
         let ty = ctx.lower_ty(type_ref);
         let ty = self.insert_type_vars(ty);
         self.normalize_associated_types_in(ty)
@@ -937,7 +968,21 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn unify(&mut self, ty1: &Ty, ty2: &Ty) -> bool {
-        self.table.unify(ty1, ty2)
+        let ty1 = ty1
+            .clone()
+            .try_fold_with(
+                &mut UnevaluatedConstEvaluatorFolder { db: self.db },
+                DebruijnIndex::INNERMOST,
+            )
+            .unwrap();
+        let ty2 = ty2
+            .clone()
+            .try_fold_with(
+                &mut UnevaluatedConstEvaluatorFolder { db: self.db },
+                DebruijnIndex::INNERMOST,
+            )
+            .unwrap();
+        self.table.unify(&ty1, &ty2)
     }
 
     /// Attempts to returns the deeply last field of nested structures, but
@@ -1070,13 +1115,10 @@ impl<'a> InferenceContext<'a> {
             Some(path) => path,
             None => return (self.err_ty(), None),
         };
-        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver);
+        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, self.owner.into());
         let (resolution, unresolved) = if value_ns {
-            match self
-                .resolver
-                .resolve_path_in_value_ns(self.db.upcast(), path)
-            {
-                Some(ResolveValueResult::ValueNs(value)) => match value {
+            match self.resolver.resolve_path_in_value_ns(self.db.upcast(), path) {
+                Some(ResolveValueResult::ValueNs(value, _)) => match value {
                     ValueNs::EnumVariantId(var) => {
                         let substs = ctx.substs_from_path(path, var.into(), true);
                         let ty = self.db.ty(var.parent.into());
@@ -1092,15 +1134,14 @@ impl<'a> InferenceContext<'a> {
                     ValueNs::ImplSelf(impl_id) => (TypeNs::SelfType(impl_id), None),
                     _ => return (self.err_ty(), None),
                 },
-                Some(ResolveValueResult::Partial(typens, unresolved)) => (typens, Some(unresolved)),
+                Some(ResolveValueResult::Partial(typens, unresolved, _)) => {
+                    (typens, Some(unresolved))
+                }
                 None => return (self.err_ty(), None),
             }
         } else {
-            match self
-                .resolver
-                .resolve_path_in_type_ns(self.db.upcast(), path)
-            {
-                Some(it) => it,
+            match self.resolver.resolve_path_in_type_ns(self.db.upcast(), path) {
+                Some((it, idx, _)) => (it, idx),
                 None => return (self.err_ty(), None),
             }
         };
@@ -1249,9 +1290,7 @@ impl<'a> InferenceContext<'a> {
         unresolved: Option<usize>,
         path: &ModPath,
     ) -> (Ty, Option<VariantId>) {
-        let remaining = unresolved
-            .map(|x| path.segments()[x..].len())
-            .filter(|x| x > &0);
+        let remaining = unresolved.map(|it| path.segments()[it..].len()).filter(|it| it > &0);
         match remaining {
             None => {
                 let variant = ty.as_adt().and_then(|(adt_id, _)| match adt_id {
@@ -1316,7 +1355,9 @@ impl<'a> InferenceContext<'a> {
             .as_function()?
             .lookup(self.db.upcast())
             .container
-        else { return None };
+        else {
+            return None;
+        };
         self.resolve_output_on(trait_)
     }
 
@@ -1416,7 +1457,7 @@ impl Expectation {
     /// The primary use case is where the expected type is a fat pointer,
     /// like `&[isize]`. For example, consider the following statement:
     ///
-    ///     let x: &[isize] = &[1, 2, 3];
+    ///     let it: &[isize] = &[1, 2, 3];
     ///
     /// In this case, the expected type for the `&[1, 2, 3]` expression is
     /// `&[isize]`. If however we were to say that `[1, 2, 3]` has the

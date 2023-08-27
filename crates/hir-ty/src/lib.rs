@@ -60,6 +60,7 @@ use hir_expand::name;
 use la_arena::{Arena, Idx};
 use mir::{MirEvalError, VTableMap};
 use rustc_hash::FxHashSet;
+use syntax::ast::{make, ConstArg};
 use traits::FnTrait;
 use triomphe::Arc;
 use utils::Generics;
@@ -68,7 +69,8 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::{
-    consteval::unknown_const, db::HirDatabase, infer::unify::InferenceTable, utils::generics,
+    consteval::unknown_const, db::HirDatabase, display::HirDisplay, infer::unify::InferenceTable,
+    utils::generics,
 };
 
 pub use autoderef::autoderef;
@@ -194,9 +196,16 @@ impl MemoryMap {
     /// allocator function as `f` and it will return a mapping of old addresses to new addresses.
     fn transform_addresses(
         &self,
-        mut f: impl FnMut(&[u8]) -> Result<usize, MirEvalError>,
+        mut f: impl FnMut(&[u8], usize) -> Result<usize, MirEvalError>,
     ) -> Result<HashMap<usize, usize>, MirEvalError> {
-        self.memory.iter().map(|x| Ok((*x.0, f(x.1)?))).collect()
+        self.memory
+            .iter()
+            .map(|x| {
+                let addr = *x.0;
+                let align = if addr == 0 { 64 } else { (addr - (addr & (addr - 1))).min(64) };
+                Ok((addr, f(x.1, align)?))
+            })
+            .collect()
     }
 
     fn get<'a>(&'a self, addr: usize, size: usize) -> Option<&'a [u8]> {
@@ -766,4 +775,17 @@ where
     };
     value.visit_with(&mut collector, DebruijnIndex::INNERMOST);
     collector.placeholders.into_iter().collect()
+}
+
+pub fn known_const_to_ast(konst: &Const, db: &dyn HirDatabase) -> Option<ConstArg> {
+    if let ConstValue::Concrete(c) = &konst.interned().value {
+        match c.interned {
+            ConstScalar::UnevaluatedConst(GeneralConstId::InTypeConstId(cid), _) => {
+                return Some(cid.source(db.upcast()));
+            }
+            ConstScalar::Unknown => return None,
+            _ => (),
+        }
+    }
+    Some(make::expr_const_value(konst.display(db).to_string().as_str()))
 }

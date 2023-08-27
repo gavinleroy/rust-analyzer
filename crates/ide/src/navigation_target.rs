@@ -102,7 +102,7 @@ impl NavigationTarget {
                 full_range,
                 SymbolKind::Module,
             );
-            res.docs = module.attrs(db).docs();
+            res.docs = module.docs(db);
             res.description = Some(module.display(db).to_string());
             return res;
         }
@@ -175,8 +175,12 @@ impl TryToNav for FileSymbol {
 
         Some(NavigationTarget {
             file_id: full_range.file_id,
-            name: if self.is_alias { self.def.name(db)?.to_smol_str() } else { self.name.clone() },
-            alias: if self.is_alias { Some(self.name.clone()) } else { None },
+            name: self
+                .is_alias
+                .then(|| self.def.name(db))
+                .flatten()
+                .map_or_else(|| self.name.clone(), |it| it.to_smol_str()),
+            alias: self.is_alias.then(|| self.name.clone()),
             kind: Some(hir::ModuleDefId::from(self.def).into()),
             full_range: full_range.range,
             focus_range,
@@ -217,6 +221,7 @@ impl TryToNav for Definition {
             Definition::Trait(it) => it.try_to_nav(db),
             Definition::TraitAlias(it) => it.try_to_nav(db),
             Definition::TypeAlias(it) => it.try_to_nav(db),
+            Definition::ExternCrateDecl(it) => Some(it.try_to_nav(db)?),
             Definition::BuiltinType(_) => None,
             Definition::ToolModule(_) => None,
             Definition::BuiltinAttr(_) => None,
@@ -357,13 +362,11 @@ impl ToNav for hir::Module {
 impl TryToNav for hir::Impl {
     fn try_to_nav(&self, db: &RootDatabase) -> Option<NavigationTarget> {
         let InFile { file_id, value } = self.source(db)?;
-        let derive_attr = self.is_builtin_derive(db);
+        let derive_attr = self.as_builtin_derive(db);
 
-        let focus = if derive_attr.is_some() { None } else { value.self_ty() };
-
-        let syntax = match &derive_attr {
-            Some(attr) => attr.value.syntax(),
-            None => value.syntax(),
+        let (focus, syntax) = match &derive_attr {
+            Some(attr) => (None, attr.value.syntax()),
+            None => (value.self_ty(), value.syntax()),
         };
 
         let (file_id, full_range, focus_range) = orig_range_with_focus(db, file_id, syntax, focus);
@@ -374,6 +377,30 @@ impl TryToNav for hir::Impl {
             full_range,
             SymbolKind::Impl,
         ))
+    }
+}
+
+impl TryToNav for hir::ExternCrateDecl {
+    fn try_to_nav(&self, db: &RootDatabase) -> Option<NavigationTarget> {
+        let src = self.source(db)?;
+        let InFile { file_id, value } = src;
+        let focus = value
+            .rename()
+            .map_or_else(|| value.name_ref().map(Either::Left), |it| it.name().map(Either::Right));
+        let (file_id, full_range, focus_range) =
+            orig_range_with_focus(db, file_id, value.syntax(), focus);
+        let mut res = NavigationTarget::from_syntax(
+            file_id,
+            self.alias_or_name(db).unwrap_or_else(|| self.name(db)).to_smol_str(),
+            focus_range,
+            full_range,
+            SymbolKind::Module,
+        );
+
+        res.docs = self.docs(db);
+        res.description = Some(self.display(db).to_string());
+        res.container_name = container_name(db, *self);
+        Some(res)
     }
 }
 

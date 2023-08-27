@@ -46,7 +46,8 @@ impl InferenceContext<'_> {
             let last = path.segments().last()?;
 
             // Don't use `self.make_ty()` here as we need `orig_ns`.
-            let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver);
+            let ctx =
+                crate::lower::TyLoweringContext::new(self.db, &self.resolver, self.owner.into());
             let (ty, orig_ns) = ctx.lower_ty_ext(type_ref);
             let ty = self.table.insert_type_vars(ty);
             let ty = self.table.normalize_associated_types_in(ty);
@@ -64,8 +65,8 @@ impl InferenceContext<'_> {
                 .resolve_path_in_value_ns(self.db.upcast(), path)?;
 
             match value_or_partial {
-                ResolveValueResult::ValueNs(it) => (it, None),
-                ResolveValueResult::Partial(def, remaining_index) => self
+                ResolveValueResult::ValueNs(it, _) => (it, None),
+                ResolveValueResult::Partial(def, remaining_index, _) => self
                     .resolve_assoc_item(def, path, remaining_index, id)
                     .map(|(it, substs)| (it, Some(substs)))?,
             }
@@ -112,7 +113,7 @@ impl InferenceContext<'_> {
             }
         };
 
-        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver);
+        let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, self.owner.into());
         let substs = ctx.substs_from_path(path, value_def, true);
         let substs = substs.as_slice(Interner);
         let parent_substs = self_subst.or_else(|| {
@@ -205,10 +206,13 @@ impl InferenceContext<'_> {
 
         match (def, is_before_last) {
             (TypeNs::TraitId(trait_), true) => {
-                let segment = remaining_segments
-                    .last()
-                    .expect("there should be at least one segment here");
-                let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver);
+                let segment =
+                    remaining_segments.last().expect("there should be at least one segment here");
+                let ctx = crate::lower::TyLoweringContext::new(
+                    self.db,
+                    &self.resolver,
+                    self.owner.into(),
+                );
                 let trait_ref =
                     ctx.lower_trait_ref_from_resolved_path(trait_, resolved_segment, None);
                 self.resolve_trait_assoc_item(trait_ref, segment, id)
@@ -220,7 +224,11 @@ impl InferenceContext<'_> {
                 // as Iterator>::Item::default`)
                 let remaining_segments_for_ty =
                     remaining_segments.take(remaining_segments.len() - 1);
-                let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver);
+                let ctx = crate::lower::TyLoweringContext::new(
+                    self.db,
+                    &self.resolver,
+                    self.owner.into(),
+                );
                 let (ty, _) = ctx.lower_partly_resolved_path(
                     def,
                     resolved_segment,

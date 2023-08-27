@@ -279,6 +279,44 @@ impl < > core::cmp::Eq for Command< > where {}"#]],
 }
 
 #[test]
+fn test_partial_eq_expand_with_derive_const() {
+    // FIXME: actually expand with const
+    check(
+        r#"
+//- minicore: derive, eq
+#[derive_const(PartialEq, Eq)]
+enum Command {
+    Move { x: i32, y: i32 },
+    Do(&'static str),
+    Jump,
+}
+"#,
+        expect![[r#"
+#[derive_const(PartialEq, Eq)]
+enum Command {
+    Move { x: i32, y: i32 },
+    Do(&'static str),
+    Jump,
+}
+
+impl < > core::cmp::PartialEq for Command< > where {
+    fn eq(&self , other: &Self ) -> bool {
+        match (self , other) {
+            (Command::Move {
+                x: x_self, y: y_self,
+            }
+            , Command::Move {
+                x: x_other, y: y_other,
+            }
+            )=>x_self.eq(x_other) && y_self.eq(y_other), (Command::Do(f0_self, ), Command::Do(f0_other, ))=>f0_self.eq(f0_other), (Command::Jump, Command::Jump)=>true , _unused=>false
+        }
+    }
+}
+impl < > core::cmp::Eq for Command< > where {}"#]],
+    );
+}
+
+#[test]
 fn test_partial_ord_expand() {
     check(
         r#"
@@ -379,6 +417,44 @@ fn test_hash_expand() {
 use core::hash::Hash;
 
 #[derive(Hash)]
+struct Foo {
+    x: i32,
+    y: u64,
+    z: (i32, u64),
+}
+"#,
+        expect![[r#"
+use core::hash::Hash;
+
+#[derive(Hash)]
+struct Foo {
+    x: i32,
+    y: u64,
+    z: (i32, u64),
+}
+
+impl < > core::hash::Hash for Foo< > where {
+    fn hash<H: core::hash::Hasher>(&self , ra_expand_state: &mut H) {
+        match self {
+            Foo {
+                x: x, y: y, z: z,
+            }
+            => {
+                x.hash(ra_expand_state);
+                y.hash(ra_expand_state);
+                z.hash(ra_expand_state);
+            }
+            ,
+        }
+    }
+}"#]],
+    );
+    check(
+        r#"
+//- minicore: derive, hash
+use core::hash::Hash;
+
+#[derive(Hash)]
 enum Command {
     Move { x: i32, y: i32 },
     Do(&'static str),
@@ -396,18 +472,18 @@ enum Command {
 }
 
 impl < > core::hash::Hash for Command< > where {
-    fn hash<H: core::hash::Hasher>(&self , state: &mut H) {
-        core::mem::discriminant(self ).hash(state);
+    fn hash<H: core::hash::Hasher>(&self , ra_expand_state: &mut H) {
+        core::mem::discriminant(self ).hash(ra_expand_state);
         match self {
             Command::Move {
                 x: x, y: y,
             }
             => {
-                x.hash(state);
-                y.hash(state);
+                x.hash(ra_expand_state);
+                y.hash(ra_expand_state);
             }
             , Command::Do(f0, )=> {
-                f0.hash(state);
+                f0.hash(ra_expand_state);
             }
             , Command::Jump=> {}
             ,

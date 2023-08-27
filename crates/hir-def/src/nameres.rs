@@ -60,7 +60,7 @@ mod tests;
 use std::{cmp::Ord, ops::Deref};
 
 use base_db::{CrateId, Edition, FileId, ProcMacroKind};
-use hir_expand::{name::Name, InFile, MacroCallId, MacroDefId};
+use hir_expand::{ast_id_map::FileAstId, name::Name, HirFileId, InFile, MacroCallId, MacroDefId};
 use itertools::Itertools;
 use la_arena::Arena;
 use profile::Count;
@@ -77,8 +77,8 @@ use crate::{
     path::ModPath,
     per_ns::PerNs,
     visibility::Visibility,
-    AstId, BlockId, BlockLoc, FunctionId, LocalModuleId, Lookup, MacroExpander, MacroId, ModuleId,
-    ProcMacroId,
+    AstId, BlockId, BlockLoc, CrateRootModuleId, ExternCrateId, FunctionId, LocalModuleId, Lookup,
+    MacroExpander, MacroId, ModuleId, ProcMacroId, UseId,
 };
 
 /// Contains the results of (early) name resolution.
@@ -93,7 +93,10 @@ use crate::{
 #[derive(Debug, PartialEq, Eq)]
 pub struct DefMap {
     _c: Count<Self>,
+    /// When this is a block def map, this will hold the block id of the the block and module that
+    /// contains this block.
     block: Option<BlockInfo>,
+    /// The modules and their data declared in this crate.
     modules: Arena<ModuleData>,
     krate: CrateId,
     /// The prelude module for this crate. This either comes from an import
@@ -102,24 +105,28 @@ pub struct DefMap {
     /// The prelude is empty for non-block DefMaps (unless `#[prelude_import]` was used,
     /// but that attribute is nightly and when used in a block, it affects resolution globally
     /// so we aren't handling this correctly anyways).
-    prelude: Option<ModuleId>,
+    prelude: Option<(ModuleId, Option<UseId>)>,
     /// `macro_use` prelude that contains macros from `#[macro_use]`'d external crates. Note that
     /// this contains all kinds of macro, not just `macro_rules!` macro.
-    macro_use_prelude: FxHashMap<Name, MacroId>,
+    /// ExternCrateId being None implies it being imported from the general prelude import.
+    macro_use_prelude: FxHashMap<Name, (MacroId, Option<ExternCrateId>)>,
 
     /// Tracks which custom derives are in scope for an item, to allow resolution of derive helper
     /// attributes.
     derive_helpers_in_scope: FxHashMap<AstId<ast::Item>, Vec<(Name, MacroId, MacroCallId)>>,
 
+    /// The diagnostics that need to be emitted for this crate.
     diagnostics: Vec<DefDiagnostic>,
 
+    /// The crate data that is shared between a crate's def map and all its block def maps.
     data: Arc<DefMapCrateData>,
 }
 
 /// Data that belongs to a crate which is shared between a crate's def map and all its block def maps.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DefMapCrateData {
-    extern_prelude: FxHashMap<Name, ModuleId>,
+    /// The extern prelude which contains all root modules of external crates that are in scope.
+    extern_prelude: FxHashMap<Name, (CrateRootModuleId, Option<ExternCrateId>)>,
 
     /// Side table for resolving derive helpers.
     exported_derives: FxHashMap<MacroDefId, Box<[Name]>>,
@@ -190,6 +197,10 @@ impl BlockRelativeModuleId {
     fn into_module(self, krate: CrateId) -> ModuleId {
         ModuleId { krate, block: self.block, local_id: self.local_id }
     }
+
+    fn is_block_module(self) -> bool {
+        self.block.is_some() && self.local_id == DefMap::ROOT
+    }
 }
 
 impl std::ops::Index<LocalModuleId> for DefMap {
@@ -207,16 +218,17 @@ pub enum ModuleOrigin {
     /// Note that non-inline modules, by definition, live inside non-macro file.
     File {
         is_mod_rs: bool,
-        declaration: AstId<ast::Module>,
+        declaration: FileAstId<ast::Module>,
         declaration_tree_id: ItemTreeId<Mod>,
         definition: FileId,
     },
     Inline {
         definition_tree_id: ItemTreeId<Mod>,
-        definition: AstId<ast::Module>,
+        definition: FileAstId<ast::Module>,
     },
     /// Pseudo-module introduced by a block scope (contains only inner items).
     BlockExpr {
+        id: BlockId,
         block: AstId<ast::BlockExpr>,
     },
 }
@@ -224,8 +236,12 @@ pub enum ModuleOrigin {
 impl ModuleOrigin {
     pub fn declaration(&self) -> Option<AstId<ast::Module>> {
         match self {
-            ModuleOrigin::File { declaration: module, .. }
-            | ModuleOrigin::Inline { definition: module, .. } => Some(*module),
+            &ModuleOrigin::File { declaration, declaration_tree_id, .. } => {
+                Some(AstId::new(declaration_tree_id.file_id(), declaration))
+            }
+            &ModuleOrigin::Inline { definition, definition_tree_id } => {
+                Some(AstId::new(definition_tree_id.file_id(), definition))
+            }
             ModuleOrigin::CrateRoot { .. } | ModuleOrigin::BlockExpr { .. } => None,
         }
     }
@@ -250,16 +266,17 @@ impl ModuleOrigin {
     /// That is, a file or a `mod foo {}` with items.
     fn definition_source(&self, db: &dyn DefDatabase) -> InFile<ModuleSource> {
         match self {
-            ModuleOrigin::File { definition, .. } | ModuleOrigin::CrateRoot { definition } => {
-                let file_id = *definition;
-                let sf = db.parse(file_id).tree();
-                InFile::new(file_id.into(), ModuleSource::SourceFile(sf))
+            &ModuleOrigin::File { definition, .. } | &ModuleOrigin::CrateRoot { definition } => {
+                let sf = db.parse(definition).tree();
+                InFile::new(definition.into(), ModuleSource::SourceFile(sf))
             }
-            ModuleOrigin::Inline { definition, .. } => InFile::new(
-                definition.file_id,
-                ModuleSource::Module(definition.to_node(db.upcast())),
+            &ModuleOrigin::Inline { definition, definition_tree_id } => InFile::new(
+                definition_tree_id.file_id(),
+                ModuleSource::Module(
+                    AstId::new(definition_tree_id.file_id(), definition).to_node(db.upcast()),
+                ),
             ),
-            ModuleOrigin::BlockExpr { block } => {
+            ModuleOrigin::BlockExpr { block, .. } => {
                 InFile::new(block.file_id, ModuleSource::BlockExpr(block.to_node(db.upcast())))
             }
         }
@@ -272,13 +289,16 @@ pub struct ModuleData {
     pub origin: ModuleOrigin,
     /// Declared visibility of this module.
     pub visibility: Visibility,
-    /// Always [`None`] for block modules
+    /// Parent module in the same `DefMap`.
+    ///
+    /// [`None`] for block modules because they are always its `DefMap`'s root.
     pub parent: Option<LocalModuleId>,
     pub children: FxHashMap<Name, LocalModuleId>,
     pub scope: ItemScope,
 }
 
 impl DefMap {
+    /// The module id of a crate or block root.
     pub const ROOT: LocalModuleId = LocalModuleId::from_raw(la_arena::RawIdx::from_u32(0));
 
     pub(crate) fn crate_def_map_query(db: &dyn DefDatabase, krate: CrateId) -> Arc<DefMap> {
@@ -301,9 +321,7 @@ impl DefMap {
     }
 
     pub(crate) fn block_def_map_query(db: &dyn DefDatabase, block_id: BlockId) -> Arc<DefMap> {
-        let block: BlockLoc = db.lookup_intern_block(block_id);
-
-        let tree_id = TreeId::new(block.ast_id.file_id, Some(block_id));
+        let block: BlockLoc = block_id.lookup(db);
 
         let parent_map = block.module.def_map(db);
         let krate = block.module.krate;
@@ -312,8 +330,10 @@ impl DefMap {
         // modules declared by blocks with items. At the moment, we don't use
         // this visibility for anything outside IDE, so that's probably OK.
         let visibility = Visibility::Module(ModuleId { krate, local_id, block: None });
-        let module_data =
-            ModuleData::new(ModuleOrigin::BlockExpr { block: block.ast_id }, visibility);
+        let module_data = ModuleData::new(
+            ModuleOrigin::BlockExpr { block: block.ast_id, id: block_id },
+            visibility,
+        );
 
         let mut def_map = DefMap::empty(krate, parent_map.data.edition, module_data);
         def_map.data = parent_map.data.clone();
@@ -325,7 +345,8 @@ impl DefMap {
             },
         });
 
-        let def_map = collector::collect_defs(db, def_map, tree_id);
+        let def_map =
+            collector::collect_defs(db, def_map, TreeId::new(block.ast_id.file_id, Some(block_id)));
         Arc::new(def_map)
     }
 
@@ -414,16 +435,20 @@ impl DefMap {
         self.block.map(|block| block.block)
     }
 
-    pub(crate) fn prelude(&self) -> Option<ModuleId> {
+    pub(crate) fn prelude(&self) -> Option<(ModuleId, Option<UseId>)> {
         self.prelude
     }
 
-    pub(crate) fn extern_prelude(&self) -> impl Iterator<Item = (&Name, ModuleId)> + '_ {
-        self.data.extern_prelude.iter().map(|(name, def)| (name, *def))
+    pub(crate) fn extern_prelude(
+        &self,
+    ) -> impl Iterator<Item = (&Name, (CrateRootModuleId, Option<ExternCrateId>))> + '_ {
+        self.data.extern_prelude.iter().map(|(name, &def)| (name, def))
     }
 
-    pub(crate) fn macro_use_prelude(&self) -> impl Iterator<Item = (&Name, MacroId)> + '_ {
-        self.macro_use_prelude.iter().map(|(name, def)| (name, *def))
+    pub(crate) fn macro_use_prelude(
+        &self,
+    ) -> impl Iterator<Item = (&Name, (MacroId, Option<ExternCrateId>))> + '_ {
+        self.macro_use_prelude.iter().map(|(name, &def)| (name, def))
     }
 
     pub fn module_id(&self, local_id: LocalModuleId) -> ModuleId {
@@ -431,8 +456,8 @@ impl DefMap {
         ModuleId { krate: self.krate, local_id, block }
     }
 
-    pub(crate) fn crate_root(&self) -> ModuleId {
-        ModuleId { krate: self.krate, block: None, local_id: DefMap::ROOT }
+    pub fn crate_root(&self) -> CrateRootModuleId {
+        CrateRootModuleId { krate: self.krate }
     }
 
     pub(crate) fn resolve_path(
@@ -476,7 +501,7 @@ impl DefMap {
     ///
     /// If `f` returns `Some(val)`, iteration is stopped and `Some(val)` is returned. If `f` returns
     /// `None`, iteration continues.
-    pub fn with_ancestor_maps<T>(
+    pub(crate) fn with_ancestor_maps<T>(
         &self,
         db: &dyn DefDatabase,
         local_mod: LocalModuleId,
@@ -617,6 +642,17 @@ impl ModuleData {
     /// Returns a node which defines this module. That is, a file or a `mod foo {}` with items.
     pub fn definition_source(&self, db: &dyn DefDatabase) -> InFile<ModuleSource> {
         self.origin.definition_source(db)
+    }
+
+    /// Same as [`definition_source`] but only returns the file id to prevent parsing the ASt.
+    pub fn definition_source_file_id(&self) -> HirFileId {
+        match self.origin {
+            ModuleOrigin::File { definition, .. } | ModuleOrigin::CrateRoot { definition } => {
+                definition.into()
+            }
+            ModuleOrigin::Inline { definition_tree_id, .. } => definition_tree_id.file_id(),
+            ModuleOrigin::BlockExpr { block, .. } => block.file_id,
+        }
     }
 
     /// Returns a node which declares this module, either a `mod foo;` or a `mod foo {}`.

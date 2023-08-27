@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as lc from "vscode-languageclient/node";
+import type * as lc from "vscode-languageclient/node";
 import * as ra from "./lsp_ext";
 import * as path from "path";
 
@@ -12,19 +12,19 @@ import {
     isRustEditor,
     LazyOutputChannel,
     log,
-    RustEditor,
+    type RustEditor,
 } from "./util";
-import { ServerStatusParams } from "./lsp_ext";
+import type { ServerStatusParams } from "./lsp_ext";
 import {
-    Dependency,
-    DependencyFile,
+    type Dependency,
+    type DependencyFile,
     RustDependenciesProvider,
-    DependencyId,
+    type DependencyId,
 } from "./dependencies_provider";
 import { execRevealDependency } from "./commands";
 import { PersistentState } from "./persistent_state";
 import { bootstrap } from "./bootstrap";
-import { ExecOptions } from "child_process";
+import type { ExecOptions } from "child_process";
 
 // We only support local folders, not eg. Live Share (`vlsl:` scheme), so don't activate if
 // only those are in use. We use "Empty" to represent these scenarios
@@ -42,10 +42,10 @@ export type Workspace =
 
 export function fetchWorkspace(): Workspace {
     const folders = (vscode.workspace.workspaceFolders || []).filter(
-        (folder) => folder.uri.scheme === "file"
+        (folder) => folder.uri.scheme === "file",
     );
     const rustDocuments = vscode.workspace.textDocuments.filter((document) =>
-        isRustDocument(document)
+        isRustDocument(document),
     );
 
     return folders.length === 0
@@ -61,7 +61,7 @@ export function fetchWorkspace(): Workspace {
 export async function discoverWorkspace(
     files: readonly vscode.TextDocument[],
     command: string[],
-    options: ExecOptions
+    options: ExecOptions,
 ): Promise<JsonProject> {
     const paths = files.map((f) => `"${f.uri.fsPath}"`).join(" ");
     const joinedCommand = command.join(" ");
@@ -94,6 +94,7 @@ export class Ctx {
     private unlinkedFiles: vscode.Uri[];
     private _dependencies: RustDependenciesProvider | undefined;
     private _treeView: vscode.TreeView<Dependency | DependencyFile | DependencyId> | undefined;
+    private lastStatus: ServerStatusParams | { health: "stopped" } = { health: "stopped" };
 
     get client() {
         return this._client;
@@ -110,7 +111,7 @@ export class Ctx {
     constructor(
         readonly extCtx: vscode.ExtensionContext,
         commandFactories: Record<string, CommandFactory>,
-        workspace: Workspace
+        workspace: Workspace,
     ) {
         extCtx.subscriptions.push(this);
         this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
@@ -186,7 +187,7 @@ export class Ctx {
 
                     log.error("Bootstrap error", err);
                     throw new Error(message);
-                }
+                },
             );
             const newEnv = Object.assign({}, process.env, this.config.serverExtraEnv);
             const run: lc.Executable = {
@@ -216,7 +217,7 @@ export class Ctx {
                             return discoverWorkspace([file], discoverProjectCommand, {
                                 cwd: path.dirname(file.uri.fsPath),
                             });
-                        })
+                        }),
                 );
 
                 this.addToDiscoveredWorkspaces(workspaces);
@@ -230,7 +231,7 @@ export class Ctx {
                     if (key === "linkedProjects" && this.config.discoveredWorkspaces.length > 0) {
                         obj["linkedProjects"] = this.config.discoveredWorkspaces;
                     }
-                }
+                },
             );
 
             this._client = await createClient(
@@ -239,17 +240,17 @@ export class Ctx {
                 initializationOptions,
                 serverOptions,
                 this.config,
-                this.unlinkedFiles
+                this.unlinkedFiles,
             );
             this.pushClientCleanup(
                 this._client.onNotification(ra.serverStatus, (params) =>
-                    this.setServerStatus(params)
-                )
+                    this.setServerStatus(params),
+                ),
             );
             this.pushClientCleanup(
                 this._client.onNotification(ra.openServerLogs, () => {
                     this.outputChannel!.show();
-                })
+                }),
             );
         }
         return this._client;
@@ -395,7 +396,7 @@ export class Ctx {
             } else {
                 callback = () =>
                     vscode.window.showErrorMessage(
-                        `command ${fullName} failed: rust-analyzer server is not running`
+                        `command ${fullName} failed: rust-analyzer server is not running`,
                     );
             }
 
@@ -404,7 +405,15 @@ export class Ctx {
     }
 
     setServerStatus(status: ServerStatusParams | { health: "stopped" }) {
+        this.lastStatus = status;
+        this.updateStatusBarItem();
+    }
+    refreshServerStatus() {
+        this.updateStatusBarItem();
+    }
+    private updateStatusBarItem() {
         let icon = "";
+        const status = this.lastStatus;
         const statusBar = this.statusBar;
         statusBar.show();
         statusBar.tooltip = new vscode.MarkdownString("", true);
@@ -414,7 +423,7 @@ export class Ctx {
                 statusBar.tooltip.appendText(status.message ?? "Ready");
                 statusBar.color = undefined;
                 statusBar.backgroundColor = undefined;
-                statusBar.command = "rust-analyzer.stopServer";
+                statusBar.command = "rust-analyzer.openLogs";
                 this.dependencies?.refresh();
                 break;
             case "warning":
@@ -423,7 +432,7 @@ export class Ctx {
                 }
                 statusBar.color = new vscode.ThemeColor("statusBarItem.warningForeground");
                 statusBar.backgroundColor = new vscode.ThemeColor(
-                    "statusBarItem.warningBackground"
+                    "statusBarItem.warningBackground",
                 );
                 statusBar.command = "rust-analyzer.openLogs";
                 icon = "$(warning) ";
@@ -440,26 +449,33 @@ export class Ctx {
             case "stopped":
                 statusBar.tooltip.appendText("Server is stopped");
                 statusBar.tooltip.appendMarkdown(
-                    "\n\n[Start server](command:rust-analyzer.startServer)"
+                    "\n\n[Start server](command:rust-analyzer.startServer)",
                 );
-                statusBar.color = undefined;
-                statusBar.backgroundColor = undefined;
+                statusBar.color = new vscode.ThemeColor("statusBarItem.warningForeground");
+                statusBar.backgroundColor = new vscode.ThemeColor(
+                    "statusBarItem.warningBackground",
+                );
                 statusBar.command = "rust-analyzer.startServer";
-                statusBar.text = `$(stop-circle) rust-analyzer`;
+                statusBar.text = "$(stop-circle) rust-analyzer";
                 return;
         }
         if (statusBar.tooltip.value) {
-            statusBar.tooltip.appendText("\n\n");
+            statusBar.tooltip.appendMarkdown("\n\n---\n\n");
         }
-        statusBar.tooltip.appendMarkdown("\n\n[Open logs](command:rust-analyzer.openLogs)");
+        statusBar.tooltip.appendMarkdown("\n\n[Open Logs](command:rust-analyzer.openLogs)");
         statusBar.tooltip.appendMarkdown(
-            "\n\n[Reload Workspace](command:rust-analyzer.reloadWorkspace)"
+            `\n\n[${
+                this.config.checkOnSave ? "Disable" : "Enable"
+            } Check on Save](command:rust-analyzer.toggleCheckOnSave)`,
         );
         statusBar.tooltip.appendMarkdown(
-            "\n\n[Rebuild Proc Macros](command:rust-analyzer.rebuildProcMacros)"
+            "\n\n[Reload Workspace](command:rust-analyzer.reloadWorkspace)",
         );
         statusBar.tooltip.appendMarkdown(
-            "\n\n[Restart server](command:rust-analyzer.restartServer)"
+            "\n\n[Rebuild Proc Macros](command:rust-analyzer.rebuildProcMacros)",
+        );
+        statusBar.tooltip.appendMarkdown(
+            "\n\n[Restart server](command:rust-analyzer.restartServer)",
         );
         statusBar.tooltip.appendMarkdown("\n\n[Stop server](command:rust-analyzer.stopServer)");
         if (!status.quiescent) icon = "$(sync~spin) ";

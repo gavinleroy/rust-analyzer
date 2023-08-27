@@ -17,7 +17,8 @@ use smallvec::SmallVec;
 use crate::{
     consteval::unknown_const_as_generic, db::HirDatabase, infer::unify::InferenceTable, primitive,
     to_assoc_type_id, to_chalk_trait_id, utils::generics, Binders, BoundVar, CallableSig,
-    GenericArg, Interner, ProjectionTy, Substitution, TraitRef, Ty, TyDefId, TyExt, TyKind,
+    GenericArg, GenericArgData, Interner, ProjectionTy, Substitution, TraitRef, Ty, TyDefId, TyExt,
+    TyKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,9 +92,9 @@ impl<D> TyBuilder<D> {
         let expected_kind = &self.param_kinds[self.vec.len()];
 
         let arg_kind = match arg.data(Interner) {
-            chalk_ir::GenericArgData::Ty(_) => ParamKind::Type,
-            chalk_ir::GenericArgData::Lifetime(_) => panic!("Got lifetime in TyBuilder::push"),
-            chalk_ir::GenericArgData::Const(c) => {
+            GenericArgData::Ty(_) => ParamKind::Type,
+            GenericArgData::Lifetime(_) => panic!("Got lifetime in TyBuilder::push"),
+            GenericArgData::Const(c) => {
                 let c = c.data(Interner);
                 ParamKind::Const(c.ty.clone())
             }
@@ -153,12 +154,9 @@ impl<D> TyBuilder<D> {
 
     fn assert_match_kind(&self, a: &chalk_ir::GenericArg<Interner>, e: &ParamKind) {
         match (a.data(Interner), e) {
-            (chalk_ir::GenericArgData::Ty(_), ParamKind::Type)
-            | (chalk_ir::GenericArgData::Const(_), ParamKind::Const(_)) => (),
-            _ => panic!(
-                "Mismatched kinds: {a:?}, {:?}, {:?}",
-                self.vec, self.param_kinds
-            ),
+            (GenericArgData::Ty(_), ParamKind::Type)
+            | (GenericArgData::Const(_), ParamKind::Const(_)) => (),
+            _ => panic!("Mismatched kinds: {a:?}, {:?}, {:?}", self.vec, self.param_kinds),
         }
     }
 }

@@ -49,8 +49,11 @@ fn check_nth_fix(nth: usize, ra_fixture_before: &str, ra_fixture_after: &str) {
         let file_id = *source_change.source_file_edits.keys().next().unwrap();
         let mut actual = db.file_text(file_id).to_string();
 
-        for edit in source_change.source_file_edits.values() {
+        for (edit, snippet_edit) in source_change.source_file_edits.values() {
             edit.apply(&mut actual);
+            if let Some(snippet_edit) = snippet_edit {
+                snippet_edit.apply(&mut actual);
+            }
         }
         actual
     };
@@ -114,6 +117,8 @@ pub(crate) fn check_diagnostics_with_config(config: DiagnosticsConfig, ra_fixtur
                 annotation.push_str(match d.severity {
                     Severity::Error => "error",
                     Severity::WeakWarning => "weak",
+                    Severity::Warning => "warn",
+                    Severity::Allow => "allow",
                 });
                 annotation.push_str(": ");
                 annotation.push_str(&d.message);
@@ -130,14 +135,19 @@ pub(crate) fn check_diagnostics_with_config(config: DiagnosticsConfig, ra_fixtur
                 )
             }
         }
-        assert_eq!(expected, actual);
+        if expected != actual {
+            let fneg = expected.iter().filter(|x| !actual.contains(x)).collect::<Vec<_>>();
+            let fpos = actual.iter().filter(|x| !expected.contains(x)).collect::<Vec<_>>();
+
+            panic!("Diagnostic test failed.\nFalse negatives: {fneg:?}\nFalse positives: {fpos:?}");
+        }
     }
 }
 
 #[test]
 fn test_disabled_diagnostics() {
     let mut config = DiagnosticsConfig::test_sample();
-    config.disabled.insert("unresolved-module".into());
+    config.disabled.insert("E0583".into());
 
     let (db, file_id) = RootDatabase::with_single_file(r#"mod foo;"#);
 
@@ -159,7 +169,7 @@ fn minicore_smoke_test() {
         let source = minicore.source_code();
         let mut config = DiagnosticsConfig::test_sample();
         // This should be ignored since we conditionaly remove code which creates single item use with braces
-        config.disabled.insert("unnecessary-braces".to_string());
+        config.disabled.insert("unused_braces".to_string());
         check_diagnostics_with_config(config, &source);
     }
 

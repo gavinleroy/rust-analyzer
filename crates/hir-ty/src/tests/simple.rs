@@ -1829,6 +1829,38 @@ impl Foo for u8 {
 }
 
 #[test]
+fn const_eval_in_function_signature() {
+    check_types(
+        r#"
+const fn foo() -> usize {
+    5
+}
+
+fn f() -> [u8; foo()] {
+    loop {}
+}
+
+fn main() {
+    let t = f();
+      //^ [u8; 5]
+}"#,
+    );
+    check_types(
+        r#"
+//- minicore: default, builtin_impls
+fn f() -> [u8; Default::default()] {
+    loop {}
+}
+
+fn main() {
+    let t = f();
+      //^ [u8; 0]
+}
+    "#,
+    );
+}
+
+#[test]
 fn shadowing_primitive_with_inner_items() {
     check_types(
         r#"
@@ -3465,7 +3497,22 @@ fn func() {
     );
 }
 
-// FIXME
+#[test]
+fn pointee_trait() {
+    check_types(
+        r#"
+//- minicore: pointee
+use core::ptr::Pointee;
+fn func() {
+    let x: <u8 as Pointee>::Metadata;
+      //^ ()
+    let x: <[u8] as Pointee>::Metadata;
+      //^ usize
+}
+    "#,
+    );
+}
+
 #[test]
 fn castable_to() {
     check_infer(
@@ -3490,10 +3537,10 @@ fn func() {
             120..122 '{}': ()
             138..184 '{     ...0]>; }': ()
             148..149 'x': Box<[i32; 0]>
-            152..160 'Box::new': fn new<[{unknown}; 0]>([{unknown}; 0]) -> Box<[{unknown}; 0]>
-            152..164 'Box::new([])': Box<[{unknown}; 0]>
+            152..160 'Box::new': fn new<[i32; 0]>([i32; 0]) -> Box<[i32; 0]>
+            152..164 'Box::new([])': Box<[i32; 0]>
             152..181 'Box::n...2; 0]>': Box<[i32; 0]>
-            161..163 '[]': [{unknown}; 0]
+            161..163 '[]': [i32; 0]
         "#]],
     );
 }
@@ -3526,6 +3573,21 @@ fn f<T>(t: Ark<T>) {
             125..127 '&t': &Ark<T>
             126..127 't': Ark<T>
         "#]],
+    );
+}
+
+#[test]
+fn ref_to_array_to_ptr_cast() {
+    check_types(
+        r#"
+fn default<T>() -> T { loop {} }
+fn foo() {
+    let arr = [default()];
+      //^^^ [i32; 1]
+    let ref_to_arr = &arr;
+    let casted = ref_to_arr as *const i32;
+}
+"#,
     );
 }
 

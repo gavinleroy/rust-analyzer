@@ -131,19 +131,19 @@ pub(crate) fn remove_links(markdown: &str) -> String {
 // |===
 pub(crate) fn external_docs(
     db: &RootDatabase,
-    position: &FilePosition,
+    FilePosition { file_id, offset }: FilePosition,
     target_dir: Option<&OsStr>,
     sysroot: Option<&OsStr>,
 ) -> Option<DocumentationLinks> {
     let sema = &Semantics::new(db);
-    let file = sema.parse(position.file_id).syntax().clone();
-    let token = pick_best_token(file.token_at_offset(position.offset), |kind| match kind {
+    let file = sema.parse(file_id).syntax().clone();
+    let token = pick_best_token(file.token_at_offset(offset), |kind| match kind {
         IDENT | INT_NUMBER | T![self] => 3,
         T!['('] | T![')'] => 2,
         kind if kind.is_trivia() => 0,
         _ => 1,
     })?;
-    let token = sema.descend_into_macros_single(token);
+    let token = sema.descend_into_macros_single(token, offset);
 
     let node = token.parent()?;
     let definition = match_ast! {
@@ -152,6 +152,9 @@ pub(crate) fn external_docs(
                 NameRefClass::Definition(def) => def,
                 NameRefClass::FieldShorthand { local_ref: _, field_ref } => {
                     Definition::Field(field_ref)
+                }
+                NameRefClass::ExternCrateShorthand { decl, .. } => {
+                    Definition::ExternCrateDecl(decl)
                 }
             },
             ast::Name(name) => match NameClass::classify(sema, &name)? {
@@ -209,6 +212,7 @@ pub(crate) fn resolve_doc_path_for_def(
         Definition::Macro(it) => it.resolve_doc_path(db, link, ns),
         Definition::Field(it) => it.resolve_doc_path(db, link, ns),
         Definition::SelfType(it) => it.resolve_doc_path(db, link, ns),
+        Definition::ExternCrateDecl(it) => it.resolve_doc_path(db, link, ns),
         Definition::BuiltinAttr(_)
         | Definition::ToolModule(_)
         | Definition::BuiltinType(_)
@@ -281,7 +285,7 @@ impl DocCommentToken {
         let original_start = doc_token.text_range().start();
         let relative_comment_offset = offset - original_start - prefix_len;
 
-        sema.descend_into_macros(doc_token).into_iter().find_map(|t| {
+        sema.descend_into_macros(doc_token, offset).into_iter().find_map(|t| {
             let (node, descended_prefix_len) = match_ast! {
                 match t {
                     ast::Comment(comment) => (t.parent()?, TextSize::try_from(comment.prefix().len()).ok()?),
@@ -330,7 +334,9 @@ fn get_doc_links(
         base_url.and_then(|url| url.join(path).ok())
     };
 
-    let Some((target, file, frag)) = filename_and_frag_for_def(db, def) else { return Default::default(); };
+    let Some((target, file, frag)) = filename_and_frag_for_def(db, def) else {
+        return Default::default();
+    };
 
     let (mut web_url, mut local_url) = get_doc_base_urls(db, target, target_dir, sysroot);
 
@@ -614,6 +620,9 @@ fn filename_and_frag_for_def(
             let (_, file, _) = filename_and_frag_for_def(db, adt)?;
             // FIXME fragment numbering
             return Some((adt, file, Some(String::from("impl"))));
+        }
+        Definition::ExternCrateDecl(it) => {
+            format!("{}/index.html", it.name(db).display(db.upcast()))
         }
         Definition::Local(_)
         | Definition::GenericParam(_)

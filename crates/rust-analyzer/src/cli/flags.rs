@@ -12,7 +12,7 @@ xflags::xflags! {
     /// LSP server for the Rust programming language.
     ///
     /// Subcommands and their flags do not provide any stability guarantees and may be removed or
-    /// changed without notice. Top-level flags that are not are marked as [Unstable] provide
+    /// changed without notice. Top-level flags that are not marked as [Unstable] provide
     /// backwards-compatibility and may be relied on.
     cmd rust-analyzer {
         /// Verbosity level, can be repeated multiple times.
@@ -62,12 +62,8 @@ xflags::xflags! {
             optional --randomize
             /// Run type inference in parallel.
             optional --parallel
-            /// Collect memory usage statistics.
-            optional --memory-usage
             /// Print the total length of all source and macro files (whitespace is not counted).
             optional --source-stats
-            /// Only type check, skip lowering to mir
-            optional --skip-mir-stats
 
             /// Only analyze items matching this path.
             optional -o, --only path: String
@@ -80,8 +76,26 @@ xflags::xflags! {
             optional --disable-build-scripts
             /// Don't use expand proc macros.
             optional --disable-proc-macros
-            /// Only resolve names, don't run type inference.
+            /// Skip body lowering.
+            optional --skip-lowering
+            /// Skip type inference.
             optional --skip-inference
+            /// Skip lowering to mir
+            optional --skip-mir-stats
+            /// Skip data layout calculation
+            optional --skip-data-layout
+            /// Skip const evaluation
+            optional --skip-const-eval
+            /// Runs several IDE features after analysis, including semantics highlighting, diagnostics
+            /// and annotations. This is useful for benchmarking the memory usage on a project that has
+            /// been worked on for a bit in a longer running session.
+            optional --run-all-ide-things
+        }
+
+        /// Run unit tests of the project using mir interpreter
+        cmd run-tests {
+            /// Directory with Cargo.toml.
+            required path: PathBuf
         }
 
         cmd diagnostics {
@@ -92,10 +106,12 @@ xflags::xflags! {
             optional --disable-build-scripts
             /// Don't use expand proc macros.
             optional --disable-proc-macros
+            /// Run a custom proc-macro-srv binary.
+            optional --proc-macro-srv path: PathBuf
         }
 
         cmd ssr {
-            /// A structured search replace rule (`$a.foo($b) ==> bar($a, $b)`)
+            /// A structured search replace rule (`$a.foo($b) ==>> bar($a, $b)`)
             repeated rule: SsrRule
         }
 
@@ -139,6 +155,7 @@ pub enum RustAnalyzerCmd {
     Symbols(Symbols),
     Highlight(Highlight),
     AnalysisStats(AnalysisStats),
+    RunTests(RunTests),
     Diagnostics(Diagnostics),
     Ssr(Ssr),
     Search(Search),
@@ -172,15 +189,23 @@ pub struct AnalysisStats {
     pub output: Option<OutputFormat>,
     pub randomize: bool,
     pub parallel: bool,
-    pub memory_usage: bool,
     pub source_stats: bool,
-    pub skip_mir_stats: bool,
     pub only: Option<String>,
     pub with_deps: bool,
     pub no_sysroot: bool,
     pub disable_build_scripts: bool,
     pub disable_proc_macros: bool,
+    pub skip_lowering: bool,
     pub skip_inference: bool,
+    pub skip_mir_stats: bool,
+    pub skip_data_layout: bool,
+    pub skip_const_eval: bool,
+    pub run_all_ide_things: bool,
+}
+
+#[derive(Debug)]
+pub struct RunTests {
+    pub path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -189,6 +214,7 @@ pub struct Diagnostics {
 
     pub disable_build_scripts: bool,
     pub disable_proc_macros: bool,
+    pub proc_macro_srv: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -211,6 +237,7 @@ pub struct Lsif {
 #[derive(Debug)]
 pub struct Scip {
     pub path: PathBuf,
+
     pub output: Option<PathBuf>,
 }
 

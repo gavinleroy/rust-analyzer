@@ -5,7 +5,7 @@ mod match_check;
 mod unsafe_check;
 
 pub use crate::diagnostics::{
-    decl_check::{incorrect_case, IncorrectCase},
+    decl_check::{incorrect_case, CaseType, IncorrectCase},
     expr::{
         record_literal_missing_fields, record_pattern_missing_fields, BodyValidationDiagnostic,
     },

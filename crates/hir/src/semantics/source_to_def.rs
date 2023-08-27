@@ -93,9 +93,9 @@ use hir_def::{
         DynMap,
     },
     hir::{BindingId, LabelId},
-    AdtId, ConstId, ConstParamId, DefWithBodyId, EnumId, EnumVariantId, FieldId, FunctionId,
-    GenericDefId, GenericParamId, ImplId, LifetimeParamId, MacroId, ModuleId, StaticId, StructId,
-    TraitAliasId, TraitId, TypeAliasId, TypeParamId, UnionId, VariantId,
+    AdtId, ConstId, ConstParamId, DefWithBodyId, EnumId, EnumVariantId, ExternCrateId, FieldId,
+    FunctionId, GenericDefId, GenericParamId, ImplId, LifetimeParamId, MacroId, ModuleId, StaticId,
+    StructId, TraitAliasId, TraitId, TypeAliasId, TypeParamId, UnionId, UseId, VariantId,
 };
 use hir_expand::{attrs::AttrId, name::AsName, HirFileId, MacroCallId};
 use rustc_hash::FxHashMap;
@@ -203,6 +203,16 @@ impl SourceToDefCtx<'_, '_> {
     ) -> Option<EnumVariantId> {
         self.to_def(src, keys::VARIANT)
     }
+    pub(super) fn extern_crate_to_def(
+        &mut self,
+        src: InFile<ast::ExternCrate>,
+    ) -> Option<ExternCrateId> {
+        self.to_def(src, keys::EXTERN_CRATE)
+    }
+    #[allow(dead_code)]
+    pub(super) fn use_to_def(&mut self, src: InFile<ast::Use>) -> Option<UseId> {
+        self.to_def(src, keys::USE)
+    }
     pub(super) fn adt_to_def(
         &mut self,
         InFile { file_id, value }: InFile<ast::Adt>,
@@ -298,7 +308,7 @@ impl SourceToDefCtx<'_, '_> {
     pub(super) fn type_param_to_def(&mut self, src: InFile<ast::TypeParam>) -> Option<TypeParamId> {
         let container: ChildContainer = self.find_generic_param_container(src.syntax())?.into();
         let dyn_map = self.cache_for(container, src.file_id);
-        dyn_map[keys::TYPE_PARAM].get(&src.value).copied().map(|x| TypeParamId::from_unchecked(x))
+        dyn_map[keys::TYPE_PARAM].get(&src.value).copied().map(|it| TypeParamId::from_unchecked(it))
     }
 
     pub(super) fn lifetime_param_to_def(
@@ -316,7 +326,10 @@ impl SourceToDefCtx<'_, '_> {
     ) -> Option<ConstParamId> {
         let container: ChildContainer = self.find_generic_param_container(src.syntax())?.into();
         let dyn_map = self.cache_for(container, src.file_id);
-        dyn_map[keys::CONST_PARAM].get(&src.value).copied().map(|x| ConstParamId::from_unchecked(x))
+        dyn_map[keys::CONST_PARAM]
+            .get(&src.value)
+            .copied()
+            .map(|it| ConstParamId::from_unchecked(it))
     }
 
     pub(super) fn generic_param_to_def(

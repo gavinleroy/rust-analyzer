@@ -40,6 +40,7 @@ pub(super) fn print_body_hir(db: &dyn DefDatabase, body: &Body, owner: DefWithBo
             };
             format!("const {name} = ")
         }
+        DefWithBodyId::InTypeConstId(_) => format!("In type const = "),
         DefWithBodyId::VariantId(it) => {
             let src = it.parent.child_source(db);
             let variant = &src.value[it.local_id];
@@ -104,7 +105,7 @@ struct Printer<'a> {
     needs_indent: bool,
 }
 
-impl<'a> Write for Printer<'a> {
+impl Write for Printer<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for line in s.split_inclusive('\n') {
             if self.needs_indent {
@@ -124,7 +125,7 @@ impl<'a> Write for Printer<'a> {
     }
 }
 
-impl<'a> Printer<'a> {
+impl Printer<'_> {
     fn indented(&mut self, f: impl FnOnce(&mut Self)) {
         self.indent_level += 1;
         wln!(self);
@@ -175,14 +176,6 @@ impl<'a> Printer<'a> {
                     w!(self, "{}: ", self.body[*lbl].name.display(self.db));
                 }
                 w!(self, "loop ");
-                self.print_expr(*body);
-            }
-            Expr::While { condition, body, label } => {
-                if let Some(lbl) = label {
-                    w!(self, "{}: ", self.body[*lbl].name.display(self.db));
-                }
-                w!(self, "while ");
-                self.print_expr(*condition);
                 self.print_expr(*body);
             }
             Expr::Call { callee, args, is_assignee_expr: _ } => {
@@ -633,7 +626,7 @@ impl<'a> Printer<'a> {
         match literal {
             Literal::String(it) => w!(self, "{:?}", it),
             Literal::ByteString(it) => w!(self, "\"{}\"", it.escape_ascii()),
-            Literal::CString(it) => w!(self, "\"{}\\0\"", it),
+            Literal::CString(it) => w!(self, "\"{}\\0\"", it.escape_ascii()),
             Literal::Char(it) => w!(self, "'{}'", it.escape_debug()),
             Literal::Bool(it) => w!(self, "{}", it),
             Literal::Int(i, suffix) => {

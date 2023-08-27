@@ -63,6 +63,9 @@ impl MirBody {
                 let data = db.enum_data(id.parent);
                 w!(this, "enum {} = ", data.name.display(db.upcast()));
             }
+            hir_def::DefWithBodyId::InTypeConstId(id) => {
+                w!(this, "in type const {id:?} = ");
+            }
         });
         ctx.result
     }
@@ -140,7 +143,7 @@ impl<'a> MirPrettyCtx<'a> {
 
     fn for_closure(&mut self, closure: ClosureId) {
         let body = match self.db.mir_body_for_closure(closure) {
-            Ok(x) => x,
+            Ok(it) => it,
             Err(e) => {
                 wln!(self, "// error in {closure:?}: {e:?}");
                 return;
@@ -150,7 +153,7 @@ impl<'a> MirPrettyCtx<'a> {
         let indent = mem::take(&mut self.indent);
         let mut ctx = MirPrettyCtx {
             body: &body,
-            local_to_binding: body.binding_locals.iter().map(|(x, y)| (*y, x)).collect(),
+            local_to_binding: body.binding_locals.iter().map(|(it, y)| (*y, it)).collect(),
             result,
             indent,
             ..*self
@@ -172,7 +175,7 @@ impl<'a> MirPrettyCtx<'a> {
     }
 
     fn new(body: &'a MirBody, hir_body: &'a Body, db: &'a dyn HirDatabase) -> Self {
-        let local_to_binding = body.binding_locals.iter().map(|(x, y)| (*y, x)).collect();
+        let local_to_binding = body.binding_locals.iter().map(|(it, y)| (*y, it)).collect();
         MirPrettyCtx {
             body,
             db,
@@ -334,17 +337,17 @@ impl<'a> MirPrettyCtx<'a> {
                         }
                     }
                 }
-                ProjectionElem::TupleOrClosureField(x) => {
+                ProjectionElem::TupleOrClosureField(it) => {
                     f(this, local, head);
-                    w!(this, ".{}", x);
+                    w!(this, ".{}", it);
                 }
                 ProjectionElem::Index(l) => {
                     f(this, local, head);
                     w!(this, "[{}]", this.local_name(*l).display(this.db));
                 }
-                x => {
+                it => {
                     f(this, local, head);
-                    w!(this, ".{:?}", x);
+                    w!(this, ".{:?}", it);
                 }
             }
         }
@@ -375,14 +378,14 @@ impl<'a> MirPrettyCtx<'a> {
                 }
                 self.place(p);
             }
-            Rvalue::Aggregate(AggregateKind::Tuple(_), x) => {
+            Rvalue::Aggregate(AggregateKind::Tuple(_), it) => {
                 w!(self, "(");
-                self.operand_list(x);
+                self.operand_list(it);
                 w!(self, ")");
             }
-            Rvalue::Aggregate(AggregateKind::Array(_), x) => {
+            Rvalue::Aggregate(AggregateKind::Array(_), it) => {
                 w!(self, "[");
-                self.operand_list(x);
+                self.operand_list(it);
                 w!(self, "]");
             }
             Rvalue::Repeat(op, len) => {
@@ -390,19 +393,19 @@ impl<'a> MirPrettyCtx<'a> {
                 self.operand(op);
                 w!(self, "; {}]", len.display(self.db));
             }
-            Rvalue::Aggregate(AggregateKind::Adt(_, _), x) => {
+            Rvalue::Aggregate(AggregateKind::Adt(_, _), it) => {
                 w!(self, "Adt(");
-                self.operand_list(x);
+                self.operand_list(it);
                 w!(self, ")");
             }
-            Rvalue::Aggregate(AggregateKind::Closure(_), x) => {
+            Rvalue::Aggregate(AggregateKind::Closure(_), it) => {
                 w!(self, "Closure(");
-                self.operand_list(x);
+                self.operand_list(it);
                 w!(self, ")");
             }
-            Rvalue::Aggregate(AggregateKind::Union(_, _), x) => {
+            Rvalue::Aggregate(AggregateKind::Union(_, _), it) => {
                 w!(self, "Union(");
-                self.operand_list(x);
+                self.operand_list(it);
                 w!(self, ")");
             }
             Rvalue::Len(p) => {
@@ -447,8 +450,8 @@ impl<'a> MirPrettyCtx<'a> {
         }
     }
 
-    fn operand_list(&mut self, x: &[Operand]) {
-        let mut it = x.iter();
+    fn operand_list(&mut self, it: &[Operand]) {
+        let mut it = it.iter();
         if let Some(first) = it.next() {
             self.operand(first);
             for op in it {

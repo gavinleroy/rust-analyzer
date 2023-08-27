@@ -5,9 +5,7 @@ use std::{
     mem,
 };
 
-use chalk_ir::{
-    cast::Cast, fold::Shift, DebruijnIndex, GenericArgData, Mutability, TyVariableKind,
-};
+use chalk_ir::{cast::Cast, fold::Shift, DebruijnIndex, Mutability, TyVariableKind};
 use hir_def::{
     generics::TypeOrConstParamData,
     hir::{
@@ -46,11 +44,11 @@ use crate::{
 };
 
 use super::{
-    coerce::auto_deref_adjust_steps, find_breakable, BreakableContext, Diverges, Expectation,
-    InferenceContext, InferenceDiagnostic, TypeMismatch,
+    cast::CastCheck, coerce::auto_deref_adjust_steps, find_breakable, BreakableContext, Diverges,
+    Expectation, InferenceContext, InferenceDiagnostic, TypeMismatch,
 };
 
-impl<'a> InferenceContext<'a> {
+impl InferenceContext<'_> {
     pub(crate) fn infer_expr(&mut self, tgt_expr: ExprId, expected: &Expectation) -> Ty {
         let ty = self.infer_expr_inner(tgt_expr, expected);
         if let Some(expected_ty) = expected.only_has_type(&mut self.table) {
@@ -207,8 +205,8 @@ impl<'a> InferenceContext<'a> {
             } => self.infer_block(tgt_expr, *id, statements, *tail, None, expected),
             Expr::Const(id) => {
                 self.with_breakable_ctx(BreakableKind::Border, None, None, |this| {
-                    let (_, expr) = this.db.lookup_intern_anonymous_const(*id);
-                    this.infer_expr(expr, expected)
+                    let loc = this.db.lookup_intern_anonymous_const(*id);
+                    this.infer_expr(loc.root, expected)
                 })
                 .1
             }
@@ -234,31 +232,7 @@ impl<'a> InferenceContext<'a> {
                     None => self.result.standard_types.never.clone(),
                 }
             }
-            &Expr::While {
-                condition,
-                body,
-                label,
-            } => {
-                self.with_breakable_ctx(BreakableKind::Loop, None, label, |this| {
-                    this.infer_expr(
-                        condition,
-                        &Expectation::HasType(this.result.standard_types.bool_.clone()),
-                    );
-                    this.infer_expr(body, &Expectation::HasType(TyBuilder::unit()));
-                });
-
-                // the body may not run, so it diverging doesn't mean we diverge
-                self.diverges = Diverges::Maybe;
-                TyBuilder::unit()
-            }
-            Expr::Closure {
-                body,
-                args,
-                ret_type,
-                arg_types,
-                closure_kind,
-                capture_by: _,
-            } => {
+            Expr::Closure { body, args, ret_type, arg_types, closure_kind, capture_by: _ } => {
                 assert_eq!(args.len(), arg_types.len());
 
                 let mut sig_tys = Vec::with_capacity(arg_types.len() + 1);
@@ -370,7 +344,7 @@ impl<'a> InferenceContext<'a> {
             }
             Expr::Call { callee, args, .. } => {
                 let callee_ty = self.infer_expr(*callee, &Expectation::none());
-                let mut derefs = Autoderef::new(&mut self.table, callee_ty.clone());
+                let mut derefs = Autoderef::new(&mut self.table, callee_ty.clone(), false);
                 let (res, derefed_callee) = 'b: {
                     // manual loop to be able to access `derefs.table`
                     while let Some((callee_deref_ty, _)) = derefs.next() {
@@ -653,16 +627,8 @@ impl<'a> InferenceContext<'a> {
             }
             Expr::Cast { expr, type_ref } => {
                 let cast_ty = self.make_ty(type_ref);
-                // FIXME: propagate the "castable to" expectation
-                let inner_ty = self.infer_expr_no_expect(*expr);
-                match (inner_ty.kind(Interner), cast_ty.kind(Interner)) {
-                    (TyKind::Ref(_, _, inner), TyKind::Raw(_, cast)) => {
-                        // FIXME: record invalid cast diagnostic in case of mismatch
-                        self.unify(inner, cast);
-                    }
-                    // FIXME check the other kinds of cast...
-                    _ => (),
-                }
+                let expr_ty = self.infer_expr(*expr, &Expectation::Castable(cast_ty.clone()));
+                self.deferred_cast_checks.push(CastCheck::new(expr_ty, cast_ty.clone()));
                 cast_ty
             }
             Expr::Ref {
@@ -862,7 +828,7 @@ impl<'a> InferenceContext<'a> {
                     self.resolve_associated_type_with_params(
                         self_ty,
                         self.resolve_ops_index_output(),
-                        &[GenericArgData::Ty(index_ty).intern(Interner)],
+                        &[index_ty.cast(Interner)],
                     )
                 } else {
                     self.err_ty()
@@ -1037,7 +1003,7 @@ impl<'a> InferenceContext<'a> {
                 if let TyKind::Ref(Mutability::Mut, _, inner) = derefed_callee.kind(Interner) {
                     if adjustments
                         .last()
-                        .map(|x| matches!(x.kind, Adjust::Borrow(_)))
+                        .map(|it| matches!(it.kind, Adjust::Borrow(_)))
                         .unwrap_or(true)
                     {
                         // prefer reborrow to move
@@ -1533,7 +1499,7 @@ impl<'a> InferenceContext<'a> {
         receiver_ty: &Ty,
         name: &Name,
     ) -> Option<(Ty, Option<FieldId>, Vec<Adjustment>, bool)> {
-        let mut autoderef = Autoderef::new(&mut self.table, receiver_ty.clone());
+        let mut autoderef = Autoderef::new(&mut self.table, receiver_ty.clone(), false);
         let mut private_field = None;
         let res = autoderef.by_ref().find_map(|(derefed_ty, _)| {
             let (field_id, parameters) = match derefed_ty.kind(Interner) {
@@ -1603,6 +1569,13 @@ impl<'a> InferenceContext<'a> {
 
     fn infer_field_access(&mut self, tgt_expr: ExprId, receiver: ExprId, name: &Name) -> Ty {
         let receiver_ty = self.infer_expr_inner(receiver, &Expectation::none());
+
+        if name.is_missing() {
+            // Bail out early, don't even try to look up field. Also, we don't issue an unresolved
+            // field diagnostic because this is a syntax error rather than a semantic error.
+            return self.err_ty();
+        }
+
         match self.lookup_field(&receiver_ty, name) {
             Some((ty, field_id, adjustments, is_public)) => {
                 self.write_expr_adj(receiver, adjustments);
@@ -1754,7 +1727,7 @@ impl<'a> InferenceContext<'a> {
         output: Ty,
         inputs: Vec<Ty>,
     ) -> Vec<Ty> {
-        if let Some(expected_ty) = expected_output.to_option(&mut self.table) {
+        if let Some(expected_ty) = expected_output.only_has_type(&mut self.table) {
             self.table.fudge_inference(|table| {
                 if table.try_unify(&expected_ty, &output).is_ok() {
                     table.resolve_with_fallback(inputs, &|var, kind, _, _| match kind {
@@ -1828,6 +1801,7 @@ impl<'a> InferenceContext<'a> {
                 // the parameter to coerce to the expected type (for example in
                 // `coerce_unsize_expected_type_4`).
                 let param_ty = self.normalize_associated_types_in(param_ty);
+                let expected_ty = self.normalize_associated_types_in(expected_ty);
                 let expected = Expectation::rvalue_hint(self, expected_ty);
                 // infer with the expected type we have...
                 let ty = self.infer_expr_inner(arg, &expected);
@@ -1889,6 +1863,7 @@ impl<'a> InferenceContext<'a> {
                         const_or_path_to_chalk(
                             this.db,
                             &this.resolver,
+                            this.owner.into(),
                             ty,
                             c,
                             ParamLoweringMode::Placeholder,
@@ -1907,16 +1882,13 @@ impl<'a> InferenceContext<'a> {
         for (id, data) in def_generics.iter().skip(substs.len()) {
             match data {
                 TypeOrConstParamData::TypeParamData(_) => {
-                    substs.push(GenericArgData::Ty(self.table.new_type_var()).intern(Interner))
+                    substs.push(self.table.new_type_var().cast(Interner))
                 }
-                TypeOrConstParamData::ConstParamData(_) => {
-                    substs.push(
-                        GenericArgData::Const(self.table.new_const_var(
-                            self.db.const_param_ty(ConstParamId::from_unchecked(id)),
-                        ))
-                        .intern(Interner),
-                    )
-                }
+                TypeOrConstParamData::ConstParamData(_) => substs.push(
+                    self.table
+                        .new_const_var(self.db.const_param_ty(ConstParamId::from_unchecked(id)))
+                        .cast(Interner),
+                ),
             }
         }
         assert_eq!(substs.len(), total_len);

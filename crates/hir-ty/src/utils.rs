@@ -1,7 +1,7 @@
 //! Helper functions for working with def, which don't need to be a separate
 //! query, but can't be computed directly from `*Data` (ie, which need a `db`).
 
-use std::iter;
+use std::{hash::Hash, iter};
 
 use base_db::CrateId;
 use chalk_ir::{
@@ -20,21 +20,23 @@ use hir_def::{
     resolver::{HasResolver, TypeNs},
     type_ref::{TraitBoundModifier, TypeRef},
     ConstParamId, EnumId, EnumVariantId, FunctionId, GenericDefId, ItemContainerId,
-    LocalEnumVariantId, Lookup, TraitId, TypeAliasId, TypeOrConstParamId, TypeParamId,
+    LocalEnumVariantId, Lookup, OpaqueInternableThing, TraitId, TypeAliasId, TypeOrConstParamId,
+    TypeParamId,
 };
 use hir_expand::name::Name;
 use intern::Interned;
 use rustc_hash::FxHashSet;
 use smallvec::{smallvec, SmallVec};
 use stdx::never;
+use triomphe::Arc;
 
 use crate::{
     consteval::unknown_const,
     db::HirDatabase,
     layout::{Layout, TagEncoding},
     mir::pad16,
-    ChalkTraitId, Const, ConstScalar, GenericArg, Interner, Substitution, TraitRef, TraitRefExt,
-    Ty, WhereClause,
+    ChalkTraitId, Const, ConstScalar, GenericArg, Interner, Substitution, TraitEnvironment,
+    TraitRef, TraitRefExt, Ty, WhereClause,
 };
 
 pub(crate) fn fn_traits(
@@ -93,7 +95,7 @@ struct SuperTraits<'a> {
     seen: FxHashSet<ChalkTraitId>,
 }
 
-impl<'a> SuperTraits<'a> {
+impl SuperTraits<'_> {
     fn elaborate(&mut self, trait_ref: &TraitRef) {
         direct_super_trait_refs(self.db, trait_ref, |trait_ref| {
             if !self.seen.contains(&trait_ref.trait_id) {
@@ -103,7 +105,7 @@ impl<'a> SuperTraits<'a> {
     }
 }
 
-impl<'a> Iterator for SuperTraits<'a> {
+impl Iterator for SuperTraits<'_> {
     type Item = TraitRef;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -467,7 +469,7 @@ impl FallibleTypeFolder<Interner> for UnevaluatedConstEvaluatorFolder<'_> {
     ) -> Result<Const, Self::Error> {
         if let chalk_ir::ConstValue::Concrete(c) = &constant.data(Interner).value {
             if let ConstScalar::UnevaluatedConst(id, subst) = &c.interned {
-                if let Ok(eval) = self.db.const_eval(*id, subst.clone()) {
+                if let Ok(eval) = self.db.const_eval(*id, subst.clone(), None) {
                     return Ok(eval);
                 } else {
                     return Ok(unknown_const(constant.data(Interner).ty.clone()));
@@ -481,10 +483,11 @@ impl FallibleTypeFolder<Interner> for UnevaluatedConstEvaluatorFolder<'_> {
 pub(crate) fn detect_variant_from_bytes<'a>(
     layout: &'a Layout,
     db: &dyn HirDatabase,
-    krate: CrateId,
+    trait_env: Arc<TraitEnvironment>,
     b: &[u8],
     e: EnumId,
 ) -> Option<(LocalEnumVariantId, &'a Layout)> {
+    let krate = trait_env.krate;
     let (var_id, var_layout) = match &layout.variants {
         hir_def::layout::Variants::Single { index } => (index.0, &*layout),
         hir_def::layout::Variants::Multiple {
@@ -525,4 +528,29 @@ pub(crate) fn detect_variant_from_bytes<'a>(
         }
     };
     Some((var_id, var_layout))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct InTypeConstIdMetadata(pub(crate) Ty);
+
+impl OpaqueInternableThing for InTypeConstIdMetadata {
+    fn dyn_hash(&self, mut state: &mut dyn std::hash::Hasher) {
+        self.hash(&mut state);
+    }
+
+    fn dyn_eq(&self, other: &dyn OpaqueInternableThing) -> bool {
+        other.as_any().downcast_ref::<Self>().map_or(false, |x| self == x)
+    }
+
+    fn dyn_clone(&self) -> Box<dyn OpaqueInternableThing> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn box_any(&self) -> Box<dyn std::any::Any> {
+        Box::new(self.clone())
+    }
 }

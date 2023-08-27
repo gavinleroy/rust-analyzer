@@ -98,6 +98,66 @@ fn#19 main#20(#21)#21 {#22
 "##]],
     );
 }
+
+#[test]
+fn eager_expands_with_unresolved_within() {
+    check(
+        r#"
+#[rustc_builtin_macro]
+#[macro_export]
+macro_rules! format_args {}
+
+fn main(foo: ()) {
+    format_args!("{} {} {}", format_args!("{}", 0), foo, identity!(10), "bar")
+}
+"#,
+        expect![[r##"
+#[rustc_builtin_macro]
+#[macro_export]
+macro_rules! format_args {}
+
+fn main(foo: ()) {
+    /* error: unresolved macro identity */::core::fmt::Arguments::new_v1(&["", " ", " ", ], &[::core::fmt::ArgumentV1::new(&(::core::fmt::Arguments::new_v1(&["", ], &[::core::fmt::ArgumentV1::new(&(0), ::core::fmt::Display::fmt), ])), ::core::fmt::Display::fmt), ::core::fmt::ArgumentV1::new(&(foo), ::core::fmt::Display::fmt), ::core::fmt::ArgumentV1::new(&(identity!(10)), ::core::fmt::Display::fmt), ])
+}
+"##]],
+    );
+}
+
+#[test]
+fn token_mapping_eager() {
+    check(
+        r#"
+#[rustc_builtin_macro]
+#[macro_export]
+macro_rules! format_args {}
+
+macro_rules! identity {
+    ($expr:expr) => { $expr };
+}
+
+fn main(foo: ()) {
+    format_args/*+tokenids*/!("{} {} {}", format_args!("{}", 0), foo, identity!(10), "bar")
+}
+
+"#,
+        expect![[r##"
+#[rustc_builtin_macro]
+#[macro_export]
+macro_rules! format_args {}
+
+macro_rules! identity {
+    ($expr:expr) => { $expr };
+}
+
+fn main(foo: ()) {
+    // format_args/*+tokenids*/!("{} {} {}"#1,#3 format_args!("{}", 0#10),#12 foo#13,#14 identity!(10#18),#21 "bar"#22)
+::core#4294967295::fmt#4294967295::Arguments#4294967295::new_v1#4294967295(&#4294967295[#4294967295""#4294967295,#4294967295 " "#4294967295,#4294967295 " "#4294967295,#4294967295 ]#4294967295,#4294967295 &#4294967295[::core#4294967295::fmt#4294967295::ArgumentV1#4294967295::new#4294967295(&#4294967295(::core#4294967295::fmt#4294967295::Arguments#4294967295::new_v1#4294967295(&#4294967295[#4294967295""#4294967295,#4294967295 ]#4294967295,#4294967295 &#4294967295[::core#4294967295::fmt#4294967295::ArgumentV1#4294967295::new#4294967295(&#4294967295(#42949672950#10)#4294967295,#4294967295 ::core#4294967295::fmt#4294967295::Display#4294967295::fmt#4294967295)#4294967295,#4294967295 ]#4294967295)#4294967295)#4294967295,#4294967295 ::core#4294967295::fmt#4294967295::Display#4294967295::fmt#4294967295)#4294967295,#4294967295 ::core#4294967295::fmt#4294967295::ArgumentV1#4294967295::new#4294967295(&#4294967295(#4294967295foo#13)#4294967295,#4294967295 ::core#4294967295::fmt#4294967295::Display#4294967295::fmt#4294967295)#4294967295,#4294967295 ::core#4294967295::fmt#4294967295::ArgumentV1#4294967295::new#4294967295(&#4294967295(#429496729510#18)#4294967295,#4294967295 ::core#4294967295::fmt#4294967295::Display#4294967295::fmt#4294967295)#4294967295,#4294967295 ]#4294967295)#4294967295
+}
+
+"##]],
+    );
+}
+
 #[test]
 fn float_field_access_macro_input() {
     check(
@@ -807,6 +867,37 @@ macro_rules! m {
 }
 fn foo() {
     let a = foo::bar;
+}
+"#]],
+    );
+}
+
+#[test]
+fn test_type_path_is_transcribed_as_expr_path() {
+    check(
+        r#"
+macro_rules! m {
+    ($p:path) => { let $p; }
+}
+fn test() {
+    m!(S)
+    m!(S<i32>)
+    m!(S<S<i32>>)
+    m!(S<{ module::CONST < 42 }>)
+}
+"#,
+        expect![[r#"
+macro_rules! m {
+    ($p:path) => { let $p; }
+}
+fn test() {
+    let S;
+    let S:: <i32> ;
+    let S:: <S:: <i32>> ;
+    let S:: < {
+        module::CONST<42
+    }
+    > ;
 }
 "#]],
     );
