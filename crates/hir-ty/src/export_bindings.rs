@@ -13,8 +13,9 @@ use hir_def::{
 };
 
 use crate::{
+    proof_tree::utils as putils,
     self as krate,
-    interner::{self as int, Interner},
+    interner::Interner,
 };
 
 use serde::Serialize;
@@ -231,8 +232,8 @@ fn export_ra_hir_ty() {
       krate::CallableSig,
       krate::CallableSig,
       Interner,
-      int::InternedWrapper<()>,
-      int::InternIdTS,
+      putils::InternedWrapper<()>,
+      putils::InternIdTS,
 
     }
 }

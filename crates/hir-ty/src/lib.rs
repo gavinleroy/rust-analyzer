@@ -1,10 +1,6 @@
 //! The type system. We currently use this to infer types for completion, hover
 //! information and various assists.
-#![warn(
-    rust_2018_idioms,
-    unused_lifetimes,
-    semicolon_in_expressions_from_macros
-)]
+#![warn(rust_2018_idioms, unused_lifetimes, semicolon_in_expressions_from_macros)]
 #![feature(box_patterns, unboxed_closures, fn_traits)]
 
 #[allow(unused)]

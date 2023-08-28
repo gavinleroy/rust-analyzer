@@ -7,11 +7,7 @@
 //! Note that `hir_def` is a work in progress, so not all of the above is
 //! actually true.
 
-#![warn(
-    rust_2018_idioms,
-    unused_lifetimes,
-    semicolon_in_expressions_from_macros
-)]
+#![warn(rust_2018_idioms, unused_lifetimes, semicolon_in_expressions_from_macros)]
 
 #[allow(unused)]
 macro_rules! eprintln {
@@ -21,13 +17,13 @@ macro_rules! eprintln {
 pub mod db;
 
 pub mod attr;
-pub mod builtin_type;
-pub mod item_scope;
 pub mod path;
+pub mod builtin_type;
 pub mod per_ns;
+pub mod item_scope;
 
-pub mod expander;
 pub mod lower;
+pub mod expander;
 
 pub mod dyn_map;
 
@@ -42,24 +38,24 @@ pub use self::hir::type_ref;
 pub mod body;
 pub mod resolver;
 
-pub mod nameres;
 mod trace;
+pub mod nameres;
 
-pub mod child_by_source;
 pub mod src;
+pub mod child_by_source;
 
+pub mod visibility;
 pub mod find_path;
 pub mod import_map;
-pub mod visibility;
 
 pub use rustc_abi as layout;
 use triomphe::Arc;
 
 #[cfg(test)]
+mod test_db;
+#[cfg(test)]
 mod macro_expansion_tests;
 mod pretty;
-#[cfg(test)]
-mod test_db;
 
 use std::{
     hash::{Hash, Hasher},
@@ -89,7 +85,7 @@ use syntax::ast;
 use serde::{Serialize, Serializer};
 use ts_rs::TS;
 
-use tt::token_id as tt;
+use ::tt::token_id as tt;
 
 use crate::{
     builtin_type::BuiltinType,
