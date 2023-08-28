@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    proof_tree::utils::{InternIdTS, InternedTS, InternedWrapper},
+    proof_tree::utils::{InternIdTS, InternedTS},
     chalk_db, tls, ConstScalar, GenericArg, 
 };
 use chalk_ir::{Goal, GoalData};
@@ -17,12 +17,31 @@ use smallvec::SmallVec;
 use std::fmt;
 use triomphe::Arc;
 
+use chalk_ir::TSerialize;
 use serde::Serialize;
 use ts_rs::TS;
 
 #[derive(Debug, Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
 #[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
 pub struct Interner;
+
+#[derive(PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
+pub struct InternedWrapper<T: TSerialize>(pub T);
+
+impl<T: fmt::Debug + TSerialize> fmt::Debug for InternedWrapper<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl<T: TSerialize> std::ops::Deref for InternedWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl_internable!(
     InternedWrapper<Vec<chalk_ir::VariableKind<Interner>>>,

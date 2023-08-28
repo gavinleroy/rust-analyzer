@@ -261,15 +261,6 @@ pub trait HirDatabase: DefDatabase + Upcast<dyn DefDatabase> {
         goal: crate::Canonical<crate::InEnvironment<crate::Goal>>,
     ) -> Option<crate::Solution>;
 
-    #[salsa::invoke(trait_solve_trace)]
-    #[salsa::transparent]
-    fn trait_solve_trace(
-        &self,
-        krate: CrateId,
-        block: Option<BlockId>,
-        goal: crate::Canonical<crate::InEnvironment<crate::Goal>>,
-    ) -> crate::ProofTree;
-
     #[salsa::invoke(crate::traits::trait_solve_query)]
     fn trait_solve_query(
         &self,
@@ -290,12 +281,9 @@ pub trait HirDatabase: DefDatabase + Upcast<dyn DefDatabase> {
 fn infer_wait(db: &dyn HirDatabase, def: DefWithBodyId) -> Arc<InferenceResult> {
     let _p = profile::span("infer:wait").detail(|| match def {
         DefWithBodyId::FunctionId(it) => db.function_data(it).name.display(db.upcast()).to_string(),
-        DefWithBodyId::StaticId(it) => db
-            .static_data(it)
-            .name
-            .clone()
-            .display(db.upcast())
-            .to_string(),
+        DefWithBodyId::StaticId(it) => {
+            db.static_data(it).name.clone().display(db.upcast()).to_string()
+        }
         DefWithBodyId::ConstId(it) => db
             .const_data(it)
             .name
@@ -319,16 +307,6 @@ fn trait_solve_wait(
 ) -> Option<crate::Solution> {
     let _p = profile::span("trait_solve::wait");
     db.trait_solve_query(krate, block, goal).0
-}
-
-fn trait_solve_trace(
-    db: &dyn HirDatabase,
-    krate: CrateId,
-    block: Option<BlockId>,
-    goal: crate::Canonical<crate::InEnvironment<crate::Goal>>,
-) -> crate::ProofTree {
-    let _p = profile::span("trait_solve::trace");
-    db.trait_solve_query(krate, block, goal).1
 }
 
 #[test]

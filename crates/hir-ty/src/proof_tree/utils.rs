@@ -161,24 +161,6 @@ impl<T: Display + Internable + ?Sized + TSerialize> Display for InternedTS<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
-pub struct InternedWrapper<T: TSerialize>(pub T);
-
-impl<T: fmt::Debug + TSerialize> fmt::Debug for InternedWrapper<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.0, f)
-    }
-}
-
-impl<T: TSerialize> std::ops::Deref for InternedWrapper<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[derive(TS, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InternIdTS(#[ts(type = "number")] pub InternId);
 
