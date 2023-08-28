@@ -195,10 +195,7 @@ impl<'a> DeclValidator<'a> {
 
     fn validate_func(&mut self, func: FunctionId) {
         let data = self.db.function_data(func);
-        if matches!(
-            func.lookup(self.db.upcast()).container,
-            ItemContainerId::ExternBlockId(_)
-        ) {
+        if matches!(func.lookup(self.db.upcast()).container, ItemContainerId::ExternBlockId(_)) {
             cov_mark::hit!(extern_func_incorrect_case_ignored);
             return;
         }
@@ -279,10 +276,7 @@ impl<'a> DeclValidator<'a> {
             ident_type: IdentType::Function,
             ident: AstPtr::new(&ast_ptr),
             expected_case: fn_name_replacement.expected_case,
-            ident_text: fn_name_replacement
-                .current_name
-                .display(self.db.upcast())
-                .to_string(),
+            ident_text: fn_name_replacement.current_name.display(self.db.upcast()).to_string(),
             suggested_text: fn_name_replacement.suggested_text,
         };
 
@@ -330,11 +324,8 @@ impl<'a> DeclValidator<'a> {
                             continue;
                         }
 
-                        let ident_type = if is_param {
-                            IdentType::Parameter
-                        } else {
-                            IdentType::Variable
-                        };
+                        let ident_type =
+                            if is_param { IdentType::Parameter } else { IdentType::Variable };
 
                         let diagnostic = IncorrectCase {
                             file: source_ptr.file_id,
@@ -435,10 +426,7 @@ impl<'a> DeclValidator<'a> {
                 ident_type: IdentType::Structure,
                 ident: AstPtr::new(&ast_ptr),
                 expected_case: replacement.expected_case,
-                ident_text: replacement
-                    .current_name
-                    .display(self.db.upcast())
-                    .to_string(),
+                ident_text: replacement.current_name.display(self.db.upcast()).to_string(),
                 suggested_text: replacement.suggested_text,
             };
 
@@ -483,10 +471,7 @@ impl<'a> DeclValidator<'a> {
                 ident_type: IdentType::Field,
                 ident: AstPtr::new(&ast_ptr),
                 expected_case: field_to_rename.expected_case,
-                ident_text: field_to_rename
-                    .current_name
-                    .display(self.db.upcast())
-                    .to_string(),
+                ident_text: field_to_rename.current_name.display(self.db.upcast()).to_string(),
                 suggested_text: field_to_rename.suggested_text,
             };
 
@@ -570,10 +555,7 @@ impl<'a> DeclValidator<'a> {
                 ident_type: IdentType::Enum,
                 ident: AstPtr::new(&ast_ptr),
                 expected_case: replacement.expected_case,
-                ident_text: replacement
-                    .current_name
-                    .display(self.db.upcast())
-                    .to_string(),
+                ident_text: replacement.current_name.display(self.db.upcast()).to_string(),
                 suggested_text: replacement.suggested_text,
             };
 
@@ -618,10 +600,7 @@ impl<'a> DeclValidator<'a> {
                 ident_type: IdentType::Variant,
                 ident: AstPtr::new(&ast_ptr),
                 expected_case: variant_to_rename.expected_case,
-                ident_text: variant_to_rename
-                    .current_name
-                    .display(self.db.upcast())
-                    .to_string(),
+                ident_text: variant_to_rename.current_name.display(self.db.upcast()).to_string(),
                 suggested_text: variant_to_rename.suggested_text,
             };
 
@@ -668,10 +647,7 @@ impl<'a> DeclValidator<'a> {
             ident_type: IdentType::Constant,
             ident: AstPtr::new(&ast_ptr),
             expected_case: replacement.expected_case,
-            ident_text: replacement
-                .current_name
-                .display(self.db.upcast())
-                .to_string(),
+            ident_text: replacement.current_name.display(self.db.upcast()).to_string(),
             suggested_text: replacement.suggested_text,
         };
 
@@ -718,10 +694,7 @@ impl<'a> DeclValidator<'a> {
             ident_type: IdentType::StaticVariable,
             ident: AstPtr::new(&ast_ptr),
             expected_case: replacement.expected_case,
-            ident_text: replacement
-                .current_name
-                .display(self.db.upcast())
-                .to_string(),
+            ident_text: replacement.current_name.display(self.db.upcast()).to_string(),
             suggested_text: replacement.suggested_text,
         };
 

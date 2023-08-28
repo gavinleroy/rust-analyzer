@@ -10,15 +10,13 @@ use chalk_solve::infer::ParameterEnaVariableExt;
 use either::Either;
 use ena::unify::UnifyKey;
 use hir_expand::name;
-use index_vec::IndexVec;
-use rustc_hash::FxHashMap;
-use stdx::never;
 use triomphe::Arc;
 
 use tracing::debug;
 
 use super::{InferOk, InferResult, InferenceContext, TypeError};
 use crate::{
+    proof_tree::utils::{ObligationKey, ObligationTracker, QueryAttempt, AttemptKind},
     consteval::unknown_const, db::HirDatabase, fold_tys_and_consts, static_lifetime,
     to_chalk_trait_id, traits::FnTrait, AliasEq, AliasTy, BoundVar, Canonical, Const, ConstValue,
     DebruijnIndex, GenericArg, GenericArgData, Goal, Guidance, InEnvironment, InferenceVar,
@@ -140,25 +138,6 @@ bitflags::bitflags! {
 }
 
 type ChalkInferenceTable = chalk_solve::infer::InferenceTable<Interner>;
-
-index_vec::define_index_type! {
-    pub(crate) struct ObligationKey = usize;
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ObligationTracker<'a> {
-    /// The obligation attempts during the process of type-checking. For a given
-    /// tracked obligation, there may be several attempts at making it succeed.
-    /// These are *required* to succeed for type-checking to succeed.
-    pub(super) tracked: IndexVec<ObligationKey, Vec<super::QueryAttempt<'a>>>,
-
-    pub(super) info: FxHashMap<ObligationKey, (base_db::CrateId, Option<hir_def::BlockId>)>,
-
-    /// During type-inference sometimes RA wants to know if something holds,
-    /// but that isn't necessarily required for type-checking to succeed. The
-    /// responses here *can* dictate what is tried in the future.
-    pub(super) other: Vec<super::TracedTraitQuery<'a>>,
-}
 
 impl InferenceTable<'_> {
     fn fresh_key(&mut self) -> ObligationKey {
@@ -566,7 +545,7 @@ impl<'a> InferenceTable<'a> {
             resolved = false;
             self.pending_obligations.push((key, canonicalized.clone()));
         }
-        // eprintln!("RESOLVING {} {:?}", resolved, canonicalized);
+        eprintln!("RESOLVING {} {:?}", resolved, canonicalized);
     }
 
     pub(crate) fn register_infer_ok<T>(&mut self, infer_ok: InferOk<T>) {
@@ -902,7 +881,7 @@ impl<'a> InferenceTable<'a> {
         let (solution, trace) = self.db.trait_solve_query(krate, block, canonicalized.clone());
 
         let traced =
-            super::QueryAttempt { context, canonicalized, solution: solution.clone(), trace };
+            QueryAttempt { context, canonicalized, solution: solution.clone(), trace };
 
         // NOTE: this is where we actually store the proof tree. This uses a lot of memory
         // and makes the test grind to a halt. The quick HACK is to just not store the trees
@@ -919,7 +898,7 @@ impl<'a> InferenceTable<'a> {
             self.tracked_obligations.other.push(super::TracedTraitQuery {
                 krate,
                 block,
-                kind: super::AttemptKind::Try(traced),
+                kind: AttemptKind::Try(traced),
             });
         }
 

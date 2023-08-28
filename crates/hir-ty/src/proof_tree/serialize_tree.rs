@@ -1,27 +1,20 @@
 //! Serialize Tree
 
-use std::borrow::Borrow;
-
-use serde::Serialize;
-use ts_rs::TS;
-
 use chalk_ir::{
     fold::{shift::Shift, FallibleTypeFolder, TypeFoldable, TypeFolder},
     interner::HasInterner,
     *,
 };
-use chalk_solve::{RustIrDatabase, Solution};
+use chalk_solve::RustIrDatabase;
 
 use rustc_hash::FxHashMap;
 
 use argus::{
-    proof_tree::{self as pt, flat as ft, navigation::*, ProofTreeWalker},
+    proof_tree::{self as pt, flat as ft, navigation::*},
     topology::{HasTopology, TreeTopology},
-    utils::{sexp, IndexVecExt, StrongMultiMapExt},
 };
 
-use super::{writer::DeepDebug, *};
-use crate::infer::{AttemptKind, QueryAttempt, TracedTraitQuery};
+use super::{writer::DeepDebug, *, utils::*};
 use crate::{infer::unify::InferenceTable, HirDatabase, Interner};
 
 fn wrap_goal(s: String) -> GoalInfo {
@@ -63,8 +56,8 @@ pub(crate) struct TreeContext<'a> {
     proof: &'a dyn Navigation<Interner>,
 }
 
-impl From<crate::infer::TracedTraitQuery<'_>> for SerializeTree {
-    fn from(query: crate::infer::TracedTraitQuery<'_>) -> Self {
+impl From<TracedTraitQuery<'_>> for SerializeTree {
+    fn from(query: TracedTraitQuery<'_>) -> Self {
         use crate::traits::ChalkContext;
 
         let TracedTraitQuery { krate, block, kind } = query;

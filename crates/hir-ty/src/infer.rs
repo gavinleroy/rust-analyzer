@@ -50,6 +50,7 @@ use stdx::{always, never};
 use triomphe::Arc;
 
 use crate::{
+    proof_tree::utils::{TracedTraitQuery, AttemptKind},
     db::HirDatabase,
     fold_tys,
     infer::coerce::CoerceMany,
@@ -71,27 +72,6 @@ pub use unify::could_unify;
 
 use cast::CastCheck;
 pub(crate) use self::closure::{CaptureKind, CapturedItem, CapturedItemWithoutTy};
-
-#[derive(Clone, Debug)]
-pub(crate) struct QueryAttempt<'a> {
-    pub context: unify::InferenceTable<'a>,
-    pub canonicalized: crate::Canonical<crate::InEnvironment<crate::Goal>>,
-    pub solution: Option<crate::Solution>,
-    pub trace: crate::ProofTree,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum AttemptKind<'a> {
-    Required(Vec<QueryAttempt<'a>>),
-    Try(QueryAttempt<'a>),
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct TracedTraitQuery<'a> {
-    pub krate: base_db::CrateId,
-    pub block: Option<hir_def::BlockId>,
-    pub kind: AttemptKind<'a>,
-}
 
 /// The entry point of type inference.
 pub(crate) fn infer_query(db: &dyn HirDatabase, def: DefWithBodyId) -> Arc<InferenceResult> {

@@ -17,16 +17,9 @@ where
     type Item = (usize, <I as Iterator>::Item);
 
     fn next(&mut self) -> Option<(usize, <I as Iterator>::Item)> {
-        self.enumerate.next().map(|(i, elem)| {
-            (
-                if i < self.gap_pos {
-                    i
-                } else {
-                    i + self.gap_len
-                },
-                elem,
-            )
-        })
+        self.enumerate
+            .next()
+            .map(|(i, elem)| (if i < self.gap_pos { i } else { i + self.gap_len }, elem))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

@@ -41,21 +41,18 @@ pub(crate) fn to_camel_case(ident: &str) -> Option<String> {
 
             camel_cased_component
         })
-        .fold(
-            (String::new(), None),
-            |(acc, prev): (_, Option<String>), next| {
-                // separate two components with an underscore if their boundary cannot
-                // be distinguished using an uppercase/lowercase case distinction
-                let join = prev
-                    .and_then(|prev| {
-                        let f = next.chars().next()?;
-                        let l = prev.chars().last()?;
-                        Some(!char_has_case(l) && !char_has_case(f))
-                    })
-                    .unwrap_or(false);
-                (acc + if join { "_" } else { "" } + &next, Some(next))
-            },
-        )
+        .fold((String::new(), None), |(acc, prev): (_, Option<String>), next| {
+            // separate two components with an underscore if their boundary cannot
+            // be distinguished using an uppercase/lowercase case distinction
+            let join = prev
+                .and_then(|prev| {
+                    let f = next.chars().next()?;
+                    let l = prev.chars().last()?;
+                    Some(!char_has_case(l) && !char_has_case(f))
+                })
+                .unwrap_or(false);
+            (acc + if join { "_" } else { "" } + &next, Some(next))
+        })
         .0;
     Some(ret)
 }
@@ -158,18 +155,10 @@ mod tests {
     #[test]
     fn test_to_lower_snake_case() {
         check(to_lower_snake_case, "lower_snake_case", expect![[""]]);
-        check(
-            to_lower_snake_case,
-            "UPPER_SNAKE_CASE",
-            expect![["upper_snake_case"]],
-        );
+        check(to_lower_snake_case, "UPPER_SNAKE_CASE", expect![["upper_snake_case"]]);
         check(to_lower_snake_case, "Weird_Case", expect![["weird_case"]]);
         check(to_lower_snake_case, "CamelCase", expect![["camel_case"]]);
-        check(
-            to_lower_snake_case,
-            "lowerCamelCase",
-            expect![["lower_camel_case"]],
-        );
+        check(to_lower_snake_case, "lowerCamelCase", expect![["lower_camel_case"]]);
         check(to_lower_snake_case, "a", expect![[""]]);
         check(to_lower_snake_case, "abc", expect![[""]]);
         check(to_lower_snake_case, "foo__bar", expect![["foo_bar"]]);
@@ -182,16 +171,8 @@ mod tests {
         check(to_camel_case, "CamelCase_", expect![[""]]);
         check(to_camel_case, "_CamelCase", expect![[""]]);
         check(to_camel_case, "lowerCamelCase", expect![["LowerCamelCase"]]);
-        check(
-            to_camel_case,
-            "lower_snake_case",
-            expect![["LowerSnakeCase"]],
-        );
-        check(
-            to_camel_case,
-            "UPPER_SNAKE_CASE",
-            expect![["UpperSnakeCase"]],
-        );
+        check(to_camel_case, "lower_snake_case", expect![["LowerSnakeCase"]]);
+        check(to_camel_case, "UPPER_SNAKE_CASE", expect![["UpperSnakeCase"]]);
         check(to_camel_case, "Weird_Case", expect![["WeirdCase"]]);
         check(to_camel_case, "name", expect![["Name"]]);
         check(to_camel_case, "A", expect![[""]]);
@@ -206,18 +187,10 @@ mod tests {
     #[test]
     fn test_to_upper_snake_case() {
         check(to_upper_snake_case, "UPPER_SNAKE_CASE", expect![[""]]);
-        check(
-            to_upper_snake_case,
-            "lower_snake_case",
-            expect![["LOWER_SNAKE_CASE"]],
-        );
+        check(to_upper_snake_case, "lower_snake_case", expect![["LOWER_SNAKE_CASE"]]);
         check(to_upper_snake_case, "Weird_Case", expect![["WEIRD_CASE"]]);
         check(to_upper_snake_case, "CamelCase", expect![["CAMEL_CASE"]]);
-        check(
-            to_upper_snake_case,
-            "lowerCamelCase",
-            expect![["LOWER_CAMEL_CASE"]],
-        );
+        check(to_upper_snake_case, "lowerCamelCase", expect![["LOWER_CAMEL_CASE"]]);
         check(to_upper_snake_case, "A", expect![[""]]);
         check(to_upper_snake_case, "ABC", expect![[""]]);
         check(to_upper_snake_case, "X86_64", expect![[""]]);

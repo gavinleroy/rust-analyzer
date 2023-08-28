@@ -1,6 +1,7 @@
 pub mod serialize_tree;
 mod types;
 mod writer;
+pub(crate) mod utils;
 
 use serde::Serialize;
 use ts_rs::TS;

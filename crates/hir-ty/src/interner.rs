@@ -2,172 +2,27 @@
 //! representation of the various objects Chalk deals with (types, goals etc.).
 
 use std::{
-    fmt::{Debug, Display},
-    hash::{Hash, Hasher},
-    ops::Deref,
+    fmt::Debug,
+    hash::Hash,
 };
 
-use crate::{chalk_db, tls, ConstScalar, GenericArg};
-use base_db::salsa::InternId;
-use chalk_ir::{Goal, GoalData, TSerialize};
+use crate::{
+    proof_tree::utils::{InternIdTS, InternedTS, InternedWrapper},
+    chalk_db, tls, ConstScalar, GenericArg, 
+};
+use chalk_ir::{Goal, GoalData};
 use hir_def::TypeAliasId;
-use intern::{impl_internable, Internable, Interned};
+use intern::{impl_internable, Interned};
 use smallvec::SmallVec;
 use std::fmt;
 use triomphe::Arc;
 
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 use ts_rs::TS;
 
 #[derive(Debug, Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
 #[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
 pub struct Interner;
-
-pub struct InternedTS<T: Internable + ?Sized + Serialize>(pub Interned<T>);
-
-// --- ---
-
-impl<T: Internable + ?Sized + TSerialize> TS for InternedTS<T> {
-    fn name() -> String {
-        T::name()
-    }
-    fn name_with_type_args(mut args: Vec<String>) -> String {
-        assert_eq!(args.len(), 1);
-        args.remove(0)
-    }
-    fn inline() -> String {
-        T::inline()
-    }
-    fn inline_flattened() -> String {
-        T::inline_flattened()
-    }
-    fn dependencies() -> Vec<ts_rs::Dependency> {
-        T::dependencies()
-    }
-    fn transparent() -> bool {
-        T::transparent()
-    }
-}
-
-impl<T: Internable + ?Sized + TSerialize> Serialize for InternedTS<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<T: Internable + TSerialize> PartialEq for InternedTS<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-impl<T: Internable + TSerialize> Eq for InternedTS<T> {}
-
-impl PartialEq for InternedTS<str> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-impl Eq for InternedTS<str> {}
-
-impl<T: Internable + ?Sized + TSerialize> Hash for InternedTS<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state)
-    }
-}
-
-impl<T: Internable + ?Sized + TSerialize> AsRef<T> for InternedTS<T> {
-    fn as_ref(&self) -> &T {
-        self.0.as_ref()
-    }
-}
-
-impl<T: Internable + ?Sized + TSerialize> Deref for InternedTS<T> {
-    type Target = Interned<T>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T: Internable + ?Sized + TSerialize> From<Interned<T>> for InternedTS<T> {
-    fn from(data: Interned<T>) -> Self {
-        InternedTS(data)
-    }
-}
-
-impl<T: Internable + ?Sized + TSerialize> Clone for InternedTS<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T: Debug + Internable + ?Sized + TSerialize> Debug for InternedTS<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (*self.0).fmt(f)
-    }
-}
-
-impl<T: Display + Internable + ?Sized + TSerialize> Display for InternedTS<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (*self.0).fmt(f)
-    }
-}
-
-// --- ---
-
-#[derive(PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
-pub struct InternedWrapper<T: TSerialize>(T);
-
-impl<T: fmt::Debug + TSerialize> fmt::Debug for InternedWrapper<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.0, f)
-    }
-}
-
-impl<T: TSerialize> std::ops::Deref for InternedWrapper<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(TS, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct InternIdTS(#[ts(type = "number")] pub InternId);
-
-impl Serialize for InternIdTS {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let s = format!("{}", self.0.as_usize());
-        serializer.serialize_str(&s)
-    }
-}
-
-impl std::ops::Deref for InternIdTS {
-    type Target = InternId;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for InternIdTS {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl From<InternId> for InternIdTS {
-    fn from(data: InternId) -> Self {
-        InternIdTS(data)
-    }
-}
 
 impl_internable!(
     InternedWrapper<Vec<chalk_ir::VariableKind<Interner>>>,

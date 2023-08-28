@@ -68,10 +68,7 @@ fn walk_unsafe(
         &Expr::Call { callee, .. } => {
             if let Some(func) = infer[callee].as_fn_def(db) {
                 if is_fn_unsafe_to_call(db, func) {
-                    unsafe_expr_cb(UnsafeExpr {
-                        expr: current,
-                        inside_unsafe_block,
-                    });
+                    unsafe_expr_cb(UnsafeExpr { expr: current, inside_unsafe_block });
                 }
             }
         }
@@ -80,10 +77,7 @@ fn walk_unsafe(
             let value_or_partial = resolver.resolve_path_in_value_ns(db.upcast(), path);
             if let Some(ResolveValueResult::ValueNs(ValueNs::StaticId(id), _)) = value_or_partial {
                 if db.static_data(id).mutable {
-                    unsafe_expr_cb(UnsafeExpr {
-                        expr: current,
-                        inside_unsafe_block,
-                    });
+                    unsafe_expr_cb(UnsafeExpr { expr: current, inside_unsafe_block });
                 }
             }
         }
@@ -93,21 +87,12 @@ fn walk_unsafe(
                 .map(|(func, _)| is_fn_unsafe_to_call(db, func))
                 .unwrap_or(false)
             {
-                unsafe_expr_cb(UnsafeExpr {
-                    expr: current,
-                    inside_unsafe_block,
-                });
+                unsafe_expr_cb(UnsafeExpr { expr: current, inside_unsafe_block });
             }
         }
-        Expr::UnaryOp {
-            expr,
-            op: UnaryOp::Deref,
-        } => {
+        Expr::UnaryOp { expr, op: UnaryOp::Deref } => {
             if let TyKind::Raw(..) = &infer[*expr].kind(Interner) {
-                unsafe_expr_cb(UnsafeExpr {
-                    expr: current,
-                    inside_unsafe_block,
-                });
+                unsafe_expr_cb(UnsafeExpr { expr: current, inside_unsafe_block });
             }
         }
         Expr::Unsafe { .. } => {
@@ -119,14 +104,6 @@ fn walk_unsafe(
     }
 
     expr.walk_child_exprs(|child| {
-        walk_unsafe(
-            db,
-            infer,
-            def,
-            body,
-            child,
-            inside_unsafe_block,
-            unsafe_expr_cb,
-        );
+        walk_unsafe(db, infer, def, body, child, inside_unsafe_block, unsafe_expr_cb);
     });
 }

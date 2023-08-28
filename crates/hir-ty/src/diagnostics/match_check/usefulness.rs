@@ -301,13 +301,7 @@ impl<'a, 'p> MatchCheckCtx<'a, 'p> {
     ) -> Self {
         let def_map = db.crate_def_map(module.krate());
         let exhaustive_patterns = def_map.is_unstable_feature_enabled("exhaustive_patterns");
-        Self {
-            module,
-            body,
-            db,
-            pattern_arena,
-            exhaustive_patterns,
-        }
+        Self { module, body, db, pattern_arena, exhaustive_patterns }
     }
 
     pub(super) fn is_uninhabited(&self, ty: &Ty) -> bool {
@@ -700,12 +694,7 @@ fn is_useful<'p>(
 
     let ty = v.head().ty();
     let is_non_exhaustive = cx.is_foreign_non_exhaustive_enum(ty);
-    let pcx = PatCtxt {
-        cx,
-        ty,
-        is_top_level,
-        is_non_exhaustive,
-    };
+    let pcx = PatCtxt { cx, ty, is_top_level, is_non_exhaustive };
 
     // If the first pattern is an or-pattern, expand it.
     let mut ret = Usefulness::new_not_useful(witness_preference);
@@ -736,14 +725,8 @@ fn is_useful<'p>(
             // We cache the result of `Fields::wildcards` because it is used a lot.
             let spec_matrix = start_matrix.specialize_constructor(pcx, &ctor);
             let v = v.pop_head_constructor(cx, &ctor);
-            let usefulness = is_useful(
-                cx,
-                &spec_matrix,
-                &v,
-                witness_preference,
-                is_under_guard,
-                false,
-            );
+            let usefulness =
+                is_useful(cx, &spec_matrix, &v, witness_preference, is_under_guard, false);
             let usefulness = usefulness.apply_constructor(pcx, start_matrix, &ctor);
 
             // FIXME: implement `non_exhaustive_omitted_patterns` lint
@@ -816,19 +799,14 @@ pub(crate) fn compute_match_usefulness<'p>(
         })
         .collect();
 
-    let wild_pattern = cx
-        .pattern_arena
-        .alloc(DeconstructedPat::wildcard(scrut_ty.clone()));
+    let wild_pattern = cx.pattern_arena.alloc(DeconstructedPat::wildcard(scrut_ty.clone()));
     let v = PatStack::from_pattern(wild_pattern);
     let usefulness = is_useful(cx, &matrix, &v, FakeExtraWildcard, false, true);
     let non_exhaustiveness_witnesses = match usefulness {
         WithWitnesses(pats) => pats.into_iter().map(Witness::single_pattern).collect(),
         NoWitnesses { .. } => panic!("bug"),
     };
-    UsefulnessReport {
-        _arm_usefulness: arm_usefulness,
-        non_exhaustiveness_witnesses,
-    }
+    UsefulnessReport { _arm_usefulness: arm_usefulness, non_exhaustiveness_witnesses }
 }
 
 pub(crate) mod helper {
