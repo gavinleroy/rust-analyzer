@@ -182,10 +182,7 @@ pub fn layout_of_ty_query(
                 dl,
                 Scalar::Initialized {
                     value: Primitive::Int(Integer::I32, false),
-                    valid_range: WrappingRange {
-                        start: 0,
-                        end: 0x10FFFF,
-                    },
+                    valid_range: WrappingRange { start: 0, end: 0x10FFFF },
                 },
             ),
             chalk_ir::Scalar::Int(i) => scalar(
@@ -225,11 +222,7 @@ pub fn layout_of_ty_query(
             ),
         },
         TyKind::Tuple(len, tys) => {
-            let kind = if *len == 0 {
-                StructKind::AlwaysSized
-            } else {
-                StructKind::MaybeUnsized
-            };
+            let kind = if *len == 0 { StructKind::AlwaysSized } else { StructKind::MaybeUnsized };
 
             let fields = tys
                 .iter(Interner)
@@ -237,8 +230,7 @@ pub fn layout_of_ty_query(
                 .collect::<Result<Vec<_>, _>>()?;
             let fields = fields.iter().map(|it| &**it).collect::<Vec<_>>();
             let fields = fields.iter().collect::<Vec<_>>();
-            cx.univariant(dl, &fields, &ReprOptions::default(), kind)
-                .ok_or(LayoutError::Unknown)?
+            cx.univariant(dl, &fields, &ReprOptions::default(), kind).ok_or(LayoutError::Unknown)?
         }
         TyKind::Array(element, count) => {
             let count = try_const_usize(db, &count).ok_or(LayoutError::UserError(
@@ -253,20 +245,11 @@ pub fn layout_of_ty_query(
                 Abi::Aggregate { sized: true }
             };
 
-            let largest_niche = if count != 0 {
-                element.largest_niche
-            } else {
-                None
-            };
+            let largest_niche = if count != 0 { element.largest_niche } else { None };
 
             Layout {
-                variants: Variants::Single {
-                    index: struct_variant_idx(),
-                },
-                fields: FieldsShape::Array {
-                    stride: element.size,
-                    count,
-                },
+                variants: Variants::Single { index: struct_variant_idx() },
+                fields: FieldsShape::Array { stride: element.size, count },
                 abi,
                 largest_niche,
                 align: element.align,
@@ -276,13 +259,8 @@ pub fn layout_of_ty_query(
         TyKind::Slice(element) => {
             let element = db.layout_of_ty(element.clone(), trait_env.clone())?;
             Layout {
-                variants: Variants::Single {
-                    index: struct_variant_idx(),
-                },
-                fields: FieldsShape::Array {
-                    stride: element.size,
-                    count: 0,
-                },
+                variants: Variants::Single { index: struct_variant_idx() },
+                fields: FieldsShape::Array { stride: element.size, count: 0 },
                 abi: Abi::Aggregate { sized: false },
                 largest_niche: None,
                 align: element.align,
@@ -330,22 +308,15 @@ pub fn layout_of_ty_query(
         }
         TyKind::FnDef(_, _) => layout_of_unit(&cx, dl)?,
         TyKind::Str => Layout {
-            variants: Variants::Single {
-                index: struct_variant_idx(),
-            },
-            fields: FieldsShape::Array {
-                stride: Size::from_bytes(1),
-                count: 0,
-            },
+            variants: Variants::Single { index: struct_variant_idx() },
+            fields: FieldsShape::Array { stride: Size::from_bytes(1), count: 0 },
             abi: Abi::Aggregate { sized: false },
             largest_niche: None,
             align: dl.i8_align,
             size: Size::ZERO,
         },
         TyKind::Never => Layout {
-            variants: Variants::Single {
-                index: struct_variant_idx(),
-            },
+            variants: Variants::Single { index: struct_variant_idx() },
             fields: FieldsShape::Primitive,
             abi: Abi::Uninhabited,
             largest_niche: None,
@@ -392,13 +363,8 @@ pub fn layout_of_ty_query(
                 .collect::<Result<Vec<_>, _>>()?;
             let fields = fields.iter().map(|it| &**it).collect::<Vec<_>>();
             let fields = fields.iter().collect::<Vec<_>>();
-            cx.univariant(
-                dl,
-                &fields,
-                &ReprOptions::default(),
-                StructKind::AlwaysSized,
-            )
-            .ok_or(LayoutError::Unknown)?
+            cx.univariant(dl, &fields, &ReprOptions::default(), StructKind::AlwaysSized)
+                .ok_or(LayoutError::Unknown)?
         }
         TyKind::Generator(_, _) | TyKind::GeneratorWitness(_, _) => {
             return Err(LayoutError::NotImplemented)
@@ -467,10 +433,7 @@ fn field_ty(
 }
 
 fn scalar_unit(dl: &TargetDataLayout, value: Primitive) -> Scalar {
-    Scalar::Initialized {
-        value,
-        valid_range: WrappingRange::full(value.size(dl)),
-    }
+    Scalar::Initialized { value, valid_range: WrappingRange::full(value.size(dl)) }
 }
 
 fn scalar(dl: &TargetDataLayout, value: Primitive) -> Layout {

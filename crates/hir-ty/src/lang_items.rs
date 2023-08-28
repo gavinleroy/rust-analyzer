@@ -12,9 +12,7 @@ pub fn is_box(db: &dyn HirDatabase, adt: AdtId) -> bool {
 
 pub fn is_unsafe_cell(db: &dyn HirDatabase, adt: AdtId) -> bool {
     let AdtId::StructId(id) = adt else { return false };
-    db.struct_data(id)
-        .flags
-        .contains(StructFlags::IS_UNSAFE_CELL)
+    db.struct_data(id).flags.contains(StructFlags::IS_UNSAFE_CELL)
 }
 
 pub fn lang_items_for_bin_op(op: syntax::ast::BinaryOp) -> Option<(Name, LangItem)> {
@@ -49,22 +47,18 @@ pub fn lang_items_for_bin_op(op: syntax::ast::BinaryOp) -> Option<(Name, LangIte
         BinaryOp::CmpOp(cop) => match cop {
             CmpOp::Eq { negated: false } => (name![eq], LangItem::PartialEq),
             CmpOp::Eq { negated: true } => (name![ne], LangItem::PartialEq),
-            CmpOp::Ord {
-                ordering: Ordering::Less,
-                strict: false,
-            } => (name![le], LangItem::PartialOrd),
-            CmpOp::Ord {
-                ordering: Ordering::Less,
-                strict: true,
-            } => (name![lt], LangItem::PartialOrd),
-            CmpOp::Ord {
-                ordering: Ordering::Greater,
-                strict: false,
-            } => (name![ge], LangItem::PartialOrd),
-            CmpOp::Ord {
-                ordering: Ordering::Greater,
-                strict: true,
-            } => (name![gt], LangItem::PartialOrd),
+            CmpOp::Ord { ordering: Ordering::Less, strict: false } => {
+                (name![le], LangItem::PartialOrd)
+            }
+            CmpOp::Ord { ordering: Ordering::Less, strict: true } => {
+                (name![lt], LangItem::PartialOrd)
+            }
+            CmpOp::Ord { ordering: Ordering::Greater, strict: false } => {
+                (name![ge], LangItem::PartialOrd)
+            }
+            CmpOp::Ord { ordering: Ordering::Greater, strict: true } => {
+                (name![gt], LangItem::PartialOrd)
+            }
         },
         BinaryOp::Assignment { op: None } => return None,
     })

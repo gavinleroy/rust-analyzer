@@ -94,10 +94,7 @@ impl Iterator for Autoderef<'_, '_> {
             return Some((self.ty.clone(), 0));
         }
 
-        if AUTODEREF_RECURSION_LIMIT
-            .check(self.steps.len() + 1)
-            .is_err()
-        {
+        if AUTODEREF_RECURSION_LIMIT.check(self.steps.len() + 1).is_err() {
             return None;
         }
 
@@ -146,21 +143,14 @@ pub(crate) fn deref_by_trait(
     ty: Ty,
 ) -> Option<Ty> {
     let _p = profile::span("deref_by_trait");
-    if table
-        .resolve_ty_shallow(&ty)
-        .inference_var(Interner)
-        .is_some()
-    {
+    if table.resolve_ty_shallow(&ty).inference_var(Interner).is_some() {
         // don't try to deref unknown variables
         return None;
     }
 
-    let deref_trait = db
-        .lang_item(table.trait_env.krate, LangItem::Deref)
-        .and_then(|l| l.as_trait())?;
-    let target = db
-        .trait_data(deref_trait)
-        .associated_type_by_name(&name![Target])?;
+    let deref_trait =
+        db.lang_item(table.trait_env.krate, LangItem::Deref).and_then(|l| l.as_trait())?;
+    let target = db.trait_data(deref_trait).associated_type_by_name(&name![Target])?;
 
     let projection = {
         let b = TyBuilder::subst_for_def(db, deref_trait, None);

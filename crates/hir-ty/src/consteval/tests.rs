@@ -30,11 +30,7 @@ fn check_fail(ra_fixture: &str, error: impl FnOnce(ConstEvalError) -> bool) {
     match eval_goal(&db, file_id) {
         Ok(_) => panic!("Expected fail, but it succeeded"),
         Err(e) => {
-            assert!(
-                error(simplify(e.clone())),
-                "Actual error was: {}",
-                pretty_print_err(e, db)
-            )
+            assert!(error(simplify(e.clone())), "Actual error was: {}", pretty_print_err(e, db))
         }
     }
 }
@@ -2761,12 +2757,7 @@ fn type_error() {
         y.0
     };
     "#,
-        |e| {
-            matches!(
-                e,
-                ConstEvalError::MirLowerError(MirLowerError::TypeMismatch(_))
-            )
-        },
+        |e| matches!(e, ConstEvalError::MirLowerError(MirLowerError::TypeMismatch(_))),
     );
 }
 
@@ -2816,11 +2807,6 @@ fn unsized_local() {
         z[1]
     };
     "#,
-        |e| {
-            matches!(
-                e,
-                ConstEvalError::MirLowerError(MirLowerError::UnsizedTemporary(_))
-            )
-        },
+        |e| matches!(e, ConstEvalError::MirLowerError(MirLowerError::UnsizedTemporary(_))),
     );
 }

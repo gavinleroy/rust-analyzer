@@ -75,18 +75,12 @@ impl DebugContext<'_> {
         let trait_ref = projection_ty.trait_ref(self.0);
         let trait_params = trait_ref.substitution.as_slice(Interner);
         let self_ty = trait_ref.self_type_parameter(Interner);
-        write!(
-            fmt,
-            "<{self_ty:?} as {}",
-            trait_name.display(self.0.upcast())
-        )?;
+        write!(fmt, "<{self_ty:?} as {}", trait_name.display(self.0.upcast()))?;
         if trait_params.len() > 1 {
             write!(
                 fmt,
                 "<{}>",
-                trait_params[1..]
-                    .iter()
-                    .format_with(", ", |x, f| f(&format_args!("{x:?}"))),
+                trait_params[1..].iter().format_with(", ", |x, f| f(&format_args!("{x:?}"))),
             )?;
         }
         write!(fmt, ">::{}", type_alias_data.name.display(self.0.upcast()))?;
@@ -97,9 +91,7 @@ impl DebugContext<'_> {
             write!(
                 fmt,
                 "<{}>",
-                proj_params
-                    .iter()
-                    .format_with(", ", |x, f| f(&format_args!("{x:?}"))),
+                proj_params.iter().format_with(", ", |x, f| f(&format_args!("{x:?}"))),
             )?;
         }
 

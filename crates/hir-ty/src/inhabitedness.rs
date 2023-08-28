@@ -17,12 +17,8 @@ use crate::{
 
 /// Checks whether a type is visibly uninhabited from a particular module.
 pub(crate) fn is_ty_uninhabited_from(ty: &Ty, target_mod: ModuleId, db: &dyn HirDatabase) -> bool {
-    let mut uninhabited_from = UninhabitedFrom {
-        target_mod,
-        db,
-        max_depth: 500,
-        recursive_ty: FxHashSet::default(),
-    };
+    let mut uninhabited_from =
+        UninhabitedFrom { target_mod, db, max_depth: 500, recursive_ty: FxHashSet::default() };
     let inhabitedness = ty.visit_with(&mut uninhabited_from, DebruijnIndex::INNERMOST);
     inhabitedness == BREAK_VISIBLY_UNINHABITED
 }
@@ -38,12 +34,8 @@ pub(crate) fn is_enum_variant_uninhabited_from(
     let vars_attrs = db.variants_attrs(variant.parent);
     let is_local = variant.parent.lookup(db.upcast()).container.krate() == target_mod.krate();
 
-    let mut uninhabited_from = UninhabitedFrom {
-        target_mod,
-        db,
-        max_depth: 500,
-        recursive_ty: FxHashSet::default(),
-    };
+    let mut uninhabited_from =
+        UninhabitedFrom { target_mod, db, max_depth: 500, recursive_ty: FxHashSet::default() };
     let inhabitedness = uninhabited_from.visit_variant(
         variant.into(),
         &enum_data.variants[variant.local_id].variant_data,
@@ -130,11 +122,7 @@ impl UninhabitedFrom<'_> {
 
                 for (local_id, enum_var) in enum_data.variants.iter() {
                     let variant_inhabitedness = self.visit_variant(
-                        EnumVariantId {
-                            parent: e,
-                            local_id,
-                        }
-                        .into(),
+                        EnumVariantId { parent: e, local_id }.into(),
                         &enum_var.variant_data,
                         subst,
                         &vars_attrs[local_id],

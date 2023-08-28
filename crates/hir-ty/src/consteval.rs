@@ -114,9 +114,7 @@ pub(crate) fn path_to_const(
 pub fn unknown_const(ty: Ty) -> Const {
     ConstData {
         ty,
-        value: ConstValue::Concrete(chalk_ir::ConcreteConst {
-            interned: ConstScalar::Unknown,
-        }),
+        value: ConstValue::Concrete(chalk_ir::ConcreteConst { interned: ConstScalar::Unknown }),
     }
     .intern(Interner)
 }
@@ -127,11 +125,8 @@ pub fn unknown_const_as_generic(ty: Ty) -> GenericArg {
 
 /// Interns a constant scalar with the given type
 pub fn intern_const_scalar(value: ConstScalar, ty: Ty) -> Const {
-    ConstData {
-        ty,
-        value: ConstValue::Concrete(chalk_ir::ConcreteConst { interned: value }),
-    }
-    .intern(Interner)
+    ConstData { ty, value: ConstValue::Concrete(chalk_ir::ConcreteConst { interned: value }) }
+        .intern(Interner)
 }
 
 /// Interns a constant scalar with the given type
@@ -264,10 +259,7 @@ pub(crate) fn const_eval_discriminant_variant(
         let prev_idx = prev_idx.checked_sub(1).map(RawIdx::from).map(Idx::from_raw);
         let value = match prev_idx {
             Some(local_id) => {
-                let prev_variant = EnumVariantId {
-                    local_id,
-                    parent: variant_id.parent,
-                };
+                let prev_variant = EnumVariantId { local_id, parent: variant_id.parent };
                 1 + db.const_eval_discriminant(prev_variant)?
             }
             _ => 0,

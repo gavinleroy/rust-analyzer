@@ -81,12 +81,7 @@ pub(super) fn all_super_trait_refs<T>(
     cb: impl FnMut(TraitRef) -> Option<T>,
 ) -> Option<T> {
     let seen = iter::once(trait_ref.trait_id).collect();
-    SuperTraits {
-        db,
-        seen,
-        stack: vec![trait_ref],
-    }
-    .find_map(cb)
+    SuperTraits { db, seen, stack: vec![trait_ref] }.find_map(cb)
 }
 
 struct SuperTraits<'a> {
@@ -145,22 +140,17 @@ fn direct_super_traits(db: &dyn DefDatabase, trait_: TraitId, cb: impl FnMut(Tra
             WherePredicate::Lifetime { .. } => None,
         })
         .filter(|(_, bound_modifier)| matches!(bound_modifier, TraitBoundModifier::None))
-        .filter_map(
-            |(path, _)| match resolver.resolve_path_in_type_ns_fully(db, path) {
-                Some(TypeNs::TraitId(t)) => Some(t),
-                _ => None,
-            },
-        )
+        .filter_map(|(path, _)| match resolver.resolve_path_in_type_ns_fully(db, path) {
+            Some(TypeNs::TraitId(t)) => Some(t),
+            _ => None,
+        })
         .for_each(cb);
 }
 
 fn direct_super_trait_refs(db: &dyn HirDatabase, trait_ref: &TraitRef, cb: impl FnMut(TraitRef)) {
     let generic_params = db.generic_params(trait_ref.hir_trait_id().into());
     let trait_self = match generic_params.find_trait_self_param() {
-        Some(p) => TypeOrConstParamId {
-            parent: trait_ref.hir_trait_id().into(),
-            local_id: p,
-        },
+        Some(p) => TypeOrConstParamId { parent: trait_ref.hir_trait_id().into(), local_id: p },
         None => return,
     };
     db.generic_predicates_for_param(trait_self.parent, trait_self, None)
@@ -186,20 +176,14 @@ pub(super) fn associated_type_by_name_including_super_traits(
     name: &Name,
 ) -> Option<(TraitRef, TypeAliasId)> {
     all_super_trait_refs(db, trait_ref, |t| {
-        let assoc_type = db
-            .trait_data(t.hir_trait_id())
-            .associated_type_by_name(name)?;
+        let assoc_type = db.trait_data(t.hir_trait_id()).associated_type_by_name(name)?;
         Some((t, assoc_type))
     })
 }
 
 pub(crate) fn generics(db: &dyn DefDatabase, def: GenericDefId) -> Generics {
     let parent_generics = parent_generic_def(db, def).map(|def| Box::new(generics(db, def)));
-    Generics {
-        def,
-        params: db.generic_params(def),
-        parent_generics,
-    }
+    Generics { def, params: db.generic_params(def), parent_generics }
 }
 
 /// It is a bit different from the rustc equivalent. Currently it stores:
@@ -255,20 +239,9 @@ impl Generics {
         &'a self,
     ) -> impl DoubleEndedIterator<Item = (TypeOrConstParamId, &'a TypeOrConstParamData)> + 'a {
         let to_toc_id = |it: &'a Generics| {
-            move |(local_id, p)| {
-                (
-                    TypeOrConstParamId {
-                        parent: it.def,
-                        local_id,
-                    },
-                    p,
-                )
-            }
+            move |(local_id, p)| (TypeOrConstParamId { parent: it.def, local_id }, p)
         };
-        self.params
-            .iter()
-            .map(to_toc_id(self))
-            .chain(self.iter_parent())
+        self.params.iter().map(to_toc_id(self)).chain(self.iter_parent())
     }
 
     /// Iterate over types and const params without parent params.
@@ -276,15 +249,7 @@ impl Generics {
         &'a self,
     ) -> impl DoubleEndedIterator<Item = (TypeOrConstParamId, &'a TypeOrConstParamData)> + 'a {
         let to_toc_id = |it: &'a Generics| {
-            move |(local_id, p)| {
-                (
-                    TypeOrConstParamId {
-                        parent: it.def,
-                        local_id,
-                    },
-                    p,
-                )
-            }
+            move |(local_id, p)| (TypeOrConstParamId { parent: it.def, local_id }, p)
         };
         self.params.iter().map(to_toc_id(self))
     }
@@ -294,15 +259,8 @@ impl Generics {
         &self,
     ) -> impl DoubleEndedIterator<Item = (TypeOrConstParamId, &TypeOrConstParamData)> {
         self.parent_generics().into_iter().flat_map(|it| {
-            let to_toc_id = move |(local_id, p)| {
-                (
-                    TypeOrConstParamId {
-                        parent: it.def,
-                        local_id,
-                    },
-                    p,
-                )
-            };
+            let to_toc_id =
+                move |(local_id, p)| (TypeOrConstParamId { parent: it.def, local_id }, p);
             it.params.iter().map(to_toc_id)
         })
     }
@@ -335,13 +293,7 @@ impl Generics {
         });
 
         let parent_len = self.parent_generics().map_or(0, Generics::len);
-        (
-            parent_len,
-            self_params,
-            type_params,
-            const_params,
-            impl_trait_params,
-        )
+        (parent_len, self_params, type_params, const_params, impl_trait_params)
     }
 
     pub(crate) fn param_idx(&self, param: TypeOrConstParamId) -> Option<usize> {
@@ -350,11 +302,8 @@ impl Generics {
 
     fn find_param(&self, param: TypeOrConstParamId) -> Option<(usize, &TypeOrConstParamData)> {
         if param.parent == self.def {
-            let (idx, (_local_id, data)) = self
-                .params
-                .iter()
-                .enumerate()
-                .find(|(_, (idx, _))| *idx == param.local_id)?;
+            let (idx, (_local_id, data)) =
+                self.params.iter().enumerate().find(|(_, (idx, _))| *idx == param.local_id)?;
             Some((idx, data))
         } else {
             self.parent_generics()
@@ -390,9 +339,9 @@ impl Generics {
         Substitution::from_iter(
             Interner,
             self.iter_id().map(|id| match id {
-                Either::Left(id) => crate::to_placeholder_idx(db, id.into())
-                    .to_ty(Interner)
-                    .cast(Interner),
+                Either::Left(id) => {
+                    crate::to_placeholder_idx(db, id.into()).to_ty(Interner).cast(Interner)
+                }
                 Either::Right(id) => crate::to_placeholder_idx(db, id.into())
                     .to_const(Interner, db.const_param_ty(id))
                     .cast(Interner),
@@ -490,12 +439,7 @@ pub(crate) fn detect_variant_from_bytes<'a>(
     let krate = trait_env.krate;
     let (var_id, var_layout) = match &layout.variants {
         hir_def::layout::Variants::Single { index } => (index.0, &*layout),
-        hir_def::layout::Variants::Multiple {
-            tag,
-            tag_encoding,
-            variants,
-            ..
-        } => {
+        hir_def::layout::Variants::Multiple { tag, tag_encoding, variants, .. } => {
             let target_data_layout = db.target_data_layout(krate)?;
             let size = tag.size(&*target_data_layout).bytes_usize();
             let offset = layout.fields.offset(0).bytes_usize(); // The only field on enum variants is the tag field
@@ -503,18 +447,12 @@ pub(crate) fn detect_variant_from_bytes<'a>(
             match tag_encoding {
                 TagEncoding::Direct => {
                     let x = variants.iter_enumerated().find(|x| {
-                        db.const_eval_discriminant(EnumVariantId {
-                            parent: e,
-                            local_id: x.0 .0,
-                        }) == Ok(tag)
+                        db.const_eval_discriminant(EnumVariantId { parent: e, local_id: x.0 .0 })
+                            == Ok(tag)
                     })?;
                     (x.0 .0, x.1)
                 }
-                TagEncoding::Niche {
-                    untagged_variant,
-                    niche_start,
-                    ..
-                } => {
+                TagEncoding::Niche { untagged_variant, niche_start, .. } => {
                     let candidate_tag = tag.wrapping_sub(*niche_start as i128) as usize;
                     let variant = variants
                         .iter_enumerated()

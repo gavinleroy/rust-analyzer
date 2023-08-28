@@ -86,10 +86,7 @@ impl TyFingerprint {
             TyKind::Dyn(_) => ty.dyn_trait().map(TyFingerprint::Dyn)?,
             TyKind::Ref(_, _, ty) => return TyFingerprint::for_trait_impl(ty),
             TyKind::Tuple(_, subst) => {
-                let first_ty = subst
-                    .interned()
-                    .get(0)
-                    .map(|arg| arg.assert_ty_ref(Interner));
+                let first_ty = subst.interned().get(0).map(|arg| arg.assert_ty_ref(Interner));
                 match first_ty {
                     Some(ty) => return TyFingerprint::for_trait_impl(ty),
                     None => TyFingerprint::Unit,
@@ -144,9 +141,7 @@ pub struct TraitImpls {
 impl TraitImpls {
     pub(crate) fn trait_impls_in_crate_query(db: &dyn HirDatabase, krate: CrateId) -> Arc<Self> {
         let _p = profile::span("trait_impls_in_crate_query").detail(|| format!("{krate:?}"));
-        let mut impls = Self {
-            map: FxHashMap::default(),
-        };
+        let mut impls = Self { map: FxHashMap::default() };
 
         let crate_def_map = db.crate_def_map(krate);
         impls.collect_def_map(db, &crate_def_map);
@@ -157,9 +152,7 @@ impl TraitImpls {
 
     pub(crate) fn trait_impls_in_block_query(db: &dyn HirDatabase, block: BlockId) -> Arc<Self> {
         let _p = profile::span("trait_impls_in_block_query");
-        let mut impls = Self {
-            map: FxHashMap::default(),
-        };
+        let mut impls = Self { map: FxHashMap::default() };
 
         let block_def_map = db.block_def_map(block);
         impls.collect_def_map(db, &block_def_map);
@@ -200,11 +193,7 @@ impl TraitImpls {
                 // FIXME: Reservation impls should be considered during coherence checks. If we are
                 // (ever) to implement coherence checks, this filtering should be done by the trait
                 // solver.
-                if db
-                    .attrs(impl_id.into())
-                    .by_key("rustc_reservation_impl")
-                    .exists()
-                {
+                if db.attrs(impl_id.into()).by_key("rustc_reservation_impl").exists() {
                     continue;
                 }
                 let target_trait = match db.impl_trait(impl_id) {
@@ -265,9 +254,7 @@ impl TraitImpls {
     }
 
     pub fn all_impls(&self) -> impl Iterator<Item = ImplId> + '_ {
-        self.map
-            .values()
-            .flat_map(|map| map.values().flat_map(|v| v.iter().copied()))
+        self.map.values().flat_map(|map| map.values().flat_map(|v| v.iter().copied()))
     }
 }
 
@@ -287,10 +274,7 @@ pub struct InherentImpls {
 impl InherentImpls {
     pub(crate) fn inherent_impls_in_crate_query(db: &dyn HirDatabase, krate: CrateId) -> Arc<Self> {
         let _p = profile::span("inherent_impls_in_crate_query").detail(|| format!("{krate:?}"));
-        let mut impls = Self {
-            map: FxHashMap::default(),
-            invalid_impls: Vec::default(),
-        };
+        let mut impls = Self { map: FxHashMap::default(), invalid_impls: Vec::default() };
 
         let crate_def_map = db.crate_def_map(krate);
         impls.collect_def_map(db, &crate_def_map);
@@ -301,10 +285,7 @@ impl InherentImpls {
 
     pub(crate) fn inherent_impls_in_block_query(db: &dyn HirDatabase, block: BlockId) -> Arc<Self> {
         let _p = profile::span("inherent_impls_in_block_query");
-        let mut impls = Self {
-            map: FxHashMap::default(),
-            invalid_impls: Vec::default(),
-        };
+        let mut impls = Self { map: FxHashMap::default(), invalid_impls: Vec::default() };
 
         let block_def_map = db.block_def_map(block);
         impls.collect_def_map(db, &block_def_map);
@@ -442,26 +423,19 @@ pub fn def_crates(
         }
         &TyKind::Foreign(id) => {
             let alias = from_foreign_def_id(id);
-            Some(
-                if db
-                    .type_alias_data(alias)
-                    .rustc_has_incoherent_inherent_impls
-                {
-                    db.incoherent_inherent_impl_crates(cur_crate, TyFingerprint::ForeignType(id))
-                } else {
-                    smallvec![alias.module(db.upcast()).krate()]
-                },
-            )
+            Some(if db.type_alias_data(alias).rustc_has_incoherent_inherent_impls {
+                db.incoherent_inherent_impl_crates(cur_crate, TyFingerprint::ForeignType(id))
+            } else {
+                smallvec![alias.module(db.upcast()).krate()]
+            })
         }
         TyKind::Dyn(_) => {
             let trait_id = ty.dyn_trait()?;
-            Some(
-                if db.trait_data(trait_id).rustc_has_incoherent_inherent_impls {
-                    db.incoherent_inherent_impl_crates(cur_crate, TyFingerprint::Dyn(trait_id))
-                } else {
-                    smallvec![trait_id.module(db.upcast()).krate()]
-                },
-            )
+            Some(if db.trait_data(trait_id).rustc_has_incoherent_inherent_impls {
+                db.incoherent_inherent_impl_crates(cur_crate, TyFingerprint::Dyn(trait_id))
+            } else {
+                smallvec![trait_id.module(db.upcast()).krate()]
+            })
         }
         // for primitives, there may be impls in various places (core and alloc
         // mostly). We just check the whole crate graph for crates with impls
@@ -608,17 +582,13 @@ impl ReceiverAdjustments {
     }
 
     fn with_autoref(&self, m: Mutability) -> ReceiverAdjustments {
-        Self {
-            autoref: Some(m),
-            ..*self
-        }
+        Self { autoref: Some(m), ..*self }
     }
 }
 
 // This would be nicer if it just returned an iterator, but that runs into
 // lifetime problems, because we need to borrow temp `CrateImplDefs`.
 // FIXME add a context type here?
-#[tracing::instrument(level = "debug", skip(db, env, visible_from_module, callback))]
 pub(crate) fn iterate_method_candidates<T>(
     ty: &Canonical<Ty>,
     db: &dyn HirDatabase,
@@ -661,10 +631,7 @@ pub fn lookup_impl_const(
         _ => return (const_id, subs),
     };
     let substitution = Substitution::from_iter(Interner, subs.iter(Interner));
-    let trait_ref = TraitRef {
-        trait_id: to_chalk_trait_id(trait_id),
-        substitution,
-    };
+    let trait_ref = TraitRef { trait_id: to_chalk_trait_id(trait_id), substitution };
 
     let const_data = db.const_data(const_id);
     let name = match const_data.name.as_ref() {
@@ -673,13 +640,9 @@ pub fn lookup_impl_const(
     };
 
     lookup_impl_assoc_item_for_trait_ref(trait_ref, db, env, name)
-        .and_then(|assoc| {
-            if let (AssocItemId::ConstId(id), s) = assoc {
-                Some((id, s))
-            } else {
-                None
-            }
-        })
+        .and_then(
+            |assoc| if let (AssocItemId::ConstId(id), s) = assoc { Some((id, s)) } else { None },
+        )
         .unwrap_or((const_id, subs))
 }
 
@@ -727,7 +690,6 @@ pub fn is_dyn_method(
 /// Looks up the impl method that actually runs for the trait method `func`.
 ///
 /// Returns `func` if it's not a method defined in a trait or the lookup failed.
-#[tracing::instrument(level = "debug", skip(db))]
 pub(crate) fn lookup_impl_method_query(
     db: &dyn HirDatabase,
     env: Arc<TraitEnvironment>,
@@ -760,15 +722,11 @@ pub(crate) fn lookup_impl_method_query(
         impl_fn,
         Substitution::from_iter(
             Interner,
-            fn_subst
-                .iter(Interner)
-                .take(fn_params)
-                .chain(impl_subst.iter(Interner)),
+            fn_subst.iter(Interner).take(fn_params).chain(impl_subst.iter(Interner)),
         ),
     )
 }
 
-#[tracing::instrument(level = "debug", skip(db))]
 fn lookup_impl_assoc_item_for_trait_ref(
     trait_ref: TraitRef,
     db: &dyn HirDatabase,
@@ -797,25 +755,17 @@ fn lookup_impl_assoc_item_for_trait_ref(
         AssocItemId::FunctionId(f) => {
             (db.function_data(f).name == *name).then_some(AssocItemId::FunctionId(f))
         }
-        AssocItemId::ConstId(c) => {
-            db.const_data(c)
-                .name
-                .as_ref()
-                .map(|n| n == name)
-                .and_then(|result| {
-                    if result {
-                        Some(AssocItemId::ConstId(c))
-                    } else {
-                        None
-                    }
-                })
-        }
+        AssocItemId::ConstId(c) => db
+            .const_data(c)
+            .name
+            .as_ref()
+            .map(|n| n == name)
+            .and_then(|result| if result { Some(AssocItemId::ConstId(c)) } else { None }),
         AssocItemId::TypeAliasId(_) => None,
     })?;
     Some((item, impl_subst))
 }
 
-#[tracing::instrument(level = "debug", skip(impls, table))]
 fn find_matching_impl(
     mut impls: impl Iterator<Item = ImplId>,
     mut table: InferenceTable<'_>,
@@ -825,9 +775,8 @@ fn find_matching_impl(
     impls.find_map(|impl_| {
         table.run_in_snapshot(|table| {
             let impl_data = db.impl_data(impl_);
-            let impl_substs = TyBuilder::subst_for_def(db, impl_, None)
-                .fill_with_inference_vars(table)
-                .build();
+            let impl_substs =
+                TyBuilder::subst_for_def(db, impl_, None).fill_with_inference_vars(table).build();
             let trait_ref = db
                 .impl_trait(impl_)
                 .expect("non-trait method in find_matching_impl")
@@ -868,10 +817,7 @@ fn is_inherent_impl_coherent(
 
         &TyKind::Adt(AdtId(adt), _) => adt.module(db.upcast()).krate() == def_map.krate(),
         TyKind::Dyn(it) => it.principal().map_or(false, |trait_ref| {
-            from_chalk_trait_id(trait_ref.trait_id)
-                .module(db.upcast())
-                .krate()
-                == def_map.krate()
+            from_chalk_trait_id(trait_ref.trait_id).module(db.upcast()).krate() == def_map.krate()
         }),
 
         _ => true,
@@ -1012,10 +958,7 @@ fn iterate_method_candidates_with_autoref(
     name: Option<&Name>,
     mut callback: &mut dyn FnMut(ReceiverAdjustments, AssocItemId, bool) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
-    if receiver_ty
-        .value
-        .is_general_var(Interner, &receiver_ty.binders)
-    {
+    if receiver_ty.value.is_general_var(Interner, &receiver_ty.binders) {
         // don't try to resolve methods on unknown types
         return ControlFlow::Continue(());
     }
@@ -1043,24 +986,16 @@ fn iterate_method_candidates_with_autoref(
     iterate_method_candidates_by_receiver(receiver_ty, maybe_reborrowed)?;
 
     let refed = Canonical {
-        value: TyKind::Ref(
-            Mutability::Not,
-            static_lifetime(),
-            receiver_ty.value.clone(),
-        )
-        .intern(Interner),
+        value: TyKind::Ref(Mutability::Not, static_lifetime(), receiver_ty.value.clone())
+            .intern(Interner),
         binders: receiver_ty.binders.clone(),
     };
 
     iterate_method_candidates_by_receiver(&refed, first_adjustment.with_autoref(Mutability::Not))?;
 
     let ref_muted = Canonical {
-        value: TyKind::Ref(
-            Mutability::Mut,
-            static_lifetime(),
-            receiver_ty.value.clone(),
-        )
-        .intern(Interner),
+        value: TyKind::Ref(Mutability::Mut, static_lifetime(), receiver_ty.value.clone())
+            .intern(Interner),
         binders: receiver_ty.binders.clone(),
     };
 
@@ -1148,7 +1083,6 @@ fn iterate_method_candidates_for_self_ty(
     )
 }
 
-#[tracing::instrument(level = "debug", skip(table, callback))]
 fn iterate_trait_method_candidates(
     self_ty: &Ty,
     table: &mut InferenceTable<'_>,
@@ -1194,19 +1128,12 @@ fn iterate_trait_method_candidates(
             };
             if !known_implemented {
                 let goal = generic_implements_goal(db, env.clone(), t, &canonical_self_ty);
-                if db
-                    .trait_solve(env.krate, env.block, goal.cast(Interner))
-                    .is_none()
-                {
+                if db.trait_solve(env.krate, env.block, goal.cast(Interner)).is_none() {
                     continue 'traits;
                 }
             }
             known_implemented = true;
-            callback(
-                receiver_adjustments.clone().unwrap_or_default(),
-                item,
-                visible,
-            )?;
+            callback(receiver_adjustments.clone().unwrap_or_default(), item, visible)?;
         }
     }
     ControlFlow::Continue(())
@@ -1285,10 +1212,7 @@ fn iterate_inherent_methods(
             callback,
         )?;
 
-        block = db
-            .block_def_map(block_id)
-            .parent()
-            .and_then(|module| module.containing_block());
+        block = db.block_def_map(block_id).parent().and_then(|module| module.containing_block());
     }
 
     for krate in def_crates {
@@ -1326,11 +1250,7 @@ fn iterate_inherent_methods(
                         IsValidCandidate::NotVisible => false,
                         IsValidCandidate::No => continue,
                     };
-                callback(
-                    receiver_adjustments.clone().unwrap_or_default(),
-                    item,
-                    visible,
-                )?;
+                callback(receiver_adjustments.clone().unwrap_or_default(), item, visible)?;
             }
         }
         ControlFlow::Continue(())
@@ -1362,11 +1282,7 @@ fn iterate_inherent_methods(
                     IsValidCandidate::NotVisible => false,
                     IsValidCandidate::No => continue,
                 };
-                callback(
-                    receiver_adjustments.clone().unwrap_or_default(),
-                    item,
-                    visible,
-                )?;
+                callback(receiver_adjustments.clone().unwrap_or_default(), item, visible)?;
             }
         }
         ControlFlow::Continue(())
@@ -1386,11 +1302,7 @@ pub(crate) fn resolve_indexing_op(
     for (ty, adj) in deref_chain {
         let goal = generic_implements_goal(db, table.trait_env.clone(), index_trait, &ty);
         if db
-            .trait_solve(
-                table.trait_env.krate,
-                table.trait_env.block,
-                goal.cast(Interner),
-            )
+            .trait_solve(table.trait_env.krate, table.trait_env.block, goal.cast(Interner))
             .is_some()
         {
             return Some(adj);
@@ -1425,10 +1337,7 @@ fn is_valid_candidate(
             check_that!(name.map_or(true, |n| db.const_data(c).name.as_ref() == Some(n)));
 
             if let Some(from_module) = visible_from_module {
-                if !db
-                    .const_visibility(c)
-                    .is_visible_from(db.upcast(), from_module)
-                {
+                if !db.const_visibility(c).is_visible_from(db.upcast(), from_module) {
                     cov_mark::hit!(const_candidate_not_visible);
                     return IsValidCandidate::NotVisible;
                 }
@@ -1470,10 +1379,7 @@ fn is_valid_fn_candidate(
 
     check_that!(name.map_or(true, |n| n == &data.name));
     if let Some(from_module) = visible_from_module {
-        if !db
-            .function_visibility(fn_id)
-            .is_visible_from(db.upcast(), from_module)
-        {
+        if !db.function_visibility(fn_id).is_visible_from(db.upcast(), from_module) {
             cov_mark::hit!(autoderef_candidate_not_visible);
             return IsValidCandidate::NotVisible;
         }
@@ -1482,16 +1388,14 @@ fn is_valid_fn_candidate(
         let container = fn_id.lookup(db.upcast()).container;
         let (impl_subst, expect_self_ty) = match container {
             ItemContainerId::ImplId(it) => {
-                let subst = TyBuilder::subst_for_def(db, it, None)
-                    .fill_with_inference_vars(table)
-                    .build();
+                let subst =
+                    TyBuilder::subst_for_def(db, it, None).fill_with_inference_vars(table).build();
                 let self_ty = db.impl_self_ty(it).substitute(Interner, &subst);
                 (subst, self_ty)
             }
             ItemContainerId::TraitId(it) => {
-                let subst = TyBuilder::subst_for_def(db, it, None)
-                    .fill_with_inference_vars(table)
-                    .build();
+                let subst =
+                    TyBuilder::subst_for_def(db, it, None).fill_with_inference_vars(table).build();
                 let self_ty = subst.at(Interner, 0).assert_ty_ref(Interner).clone();
                 (subst, self_ty)
             }
@@ -1508,9 +1412,8 @@ fn is_valid_fn_candidate(
             check_that!(data.has_self_param());
 
             let sig = db.callable_item_signature(fn_id.into());
-            let expected_receiver = sig
-                .map(|s| s.params()[0].clone())
-                .substitute(Interner, &fn_subst);
+            let expected_receiver =
+                sig.map(|s| s.params()[0].clone()).substitute(Interner, &fn_subst);
 
             check_that!(table.unify(receiver_ty, &expected_receiver));
         }
@@ -1548,7 +1451,6 @@ fn is_valid_fn_candidate(
     })
 }
 
-#[tracing::instrument(level = "debug", skip(db, env))]
 pub fn implements_trait(
     ty: &Canonical<Ty>,
     db: &dyn HirDatabase,
@@ -1614,28 +1516,17 @@ fn autoderef_method_receiver(
     while let Some((ty, derefs)) = autoderef.next() {
         deref_chain.push((
             autoderef.table.canonicalize(ty).value,
-            ReceiverAdjustments {
-                autoref: None,
-                autoderefs: derefs,
-                unsize_array: false,
-            },
+            ReceiverAdjustments { autoref: None, autoderefs: derefs, unsize_array: false },
         ));
     }
     // As a last step, we can do array unsizing (that's the only unsizing that rustc does for method receivers!)
-    if let Some((TyKind::Array(parameters, _), binders, adj)) = deref_chain
-        .last()
-        .map(|(ty, adj)| (ty.value.kind(Interner), ty.binders.clone(), adj))
+    if let Some((TyKind::Array(parameters, _), binders, adj)) =
+        deref_chain.last().map(|(ty, adj)| (ty.value.kind(Interner), ty.binders.clone(), adj))
     {
         let unsized_ty = TyKind::Slice(parameters.clone()).intern(Interner);
         deref_chain.push((
-            Canonical {
-                value: unsized_ty,
-                binders,
-            },
-            ReceiverAdjustments {
-                unsize_array: true,
-                ..adj.clone()
-            },
+            Canonical { value: unsized_ty, binders },
+            ReceiverAdjustments { unsize_array: true, ..adj.clone() },
         ));
     }
     deref_chain

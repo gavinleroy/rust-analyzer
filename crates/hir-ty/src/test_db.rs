@@ -29,10 +29,7 @@ pub(crate) struct TestDB {
 
 impl Default for TestDB {
     fn default() -> Self {
-        let mut this = Self {
-            storage: Default::default(),
-            events: Default::default(),
-        };
+        let mut this = Self { storage: Default::default(), events: Default::default() };
         this.set_expand_proc_attr_macros_with_durability(true, Durability::HIGH);
         this
     }

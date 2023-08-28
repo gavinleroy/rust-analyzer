@@ -292,9 +292,7 @@ impl MirLowerCtx<'_> {
         let mut result: Place = self.temp(result_ref, current, span)?.into();
         let index_fn_op = Operand::const_zst(
             TyKind::FnDef(
-                self.db
-                    .intern_callable_def(CallableDefId::FunctionId(index_fn.0))
-                    .into(),
+                self.db.intern_callable_def(CallableDefId::FunctionId(index_fn.0)).into(),
                 index_fn.1,
             )
             .intern(Interner),
@@ -324,31 +322,19 @@ impl MirLowerCtx<'_> {
         mutability: bool,
     ) -> Result<Option<(Place, BasicBlockId)>> {
         let (chalk_mut, trait_lang_item, trait_method_name, borrow_kind) = if !mutability {
-            (
-                Mutability::Not,
-                LangItem::Deref,
-                name![deref],
-                BorrowKind::Shared,
-            )
+            (Mutability::Not, LangItem::Deref, name![deref], BorrowKind::Shared)
         } else {
             (
                 Mutability::Mut,
                 LangItem::DerefMut,
                 name![deref_mut],
-                BorrowKind::Mut {
-                    allow_two_phase_borrow: false,
-                },
+                BorrowKind::Mut { allow_two_phase_borrow: false },
             )
         };
         let ty_ref = TyKind::Ref(chalk_mut, static_lifetime(), source_ty.clone()).intern(Interner);
         let target_ty_ref = TyKind::Ref(chalk_mut, static_lifetime(), target_ty).intern(Interner);
         let ref_place: Place = self.temp(ty_ref, current, span)?.into();
-        self.push_assignment(
-            current,
-            ref_place.clone(),
-            Rvalue::Ref(borrow_kind, place),
-            span,
-        );
+        self.push_assignment(current, ref_place.clone(), Rvalue::Ref(borrow_kind, place), span);
         let deref_trait = self
             .resolve_lang_item(trait_lang_item)?
             .as_trait()
@@ -360,9 +346,7 @@ impl MirLowerCtx<'_> {
             .ok_or(MirLowerError::LangItemNotFound(trait_lang_item))?;
         let deref_fn_op = Operand::const_zst(
             TyKind::FnDef(
-                self.db
-                    .intern_callable_def(CallableDefId::FunctionId(deref_fn))
-                    .into(),
+                self.db.intern_callable_def(CallableDefId::FunctionId(deref_fn)).into(),
                 Substitution::from1(Interner, source_ty),
             )
             .intern(Interner),

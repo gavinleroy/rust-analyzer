@@ -62,11 +62,7 @@ pub fn layout_of_adt_query(
                 .iter()
                 .map(|(idx, v)| {
                     handle_variant(
-                        EnumVariantId {
-                            parent: e,
-                            local_id: idx,
-                        }
-                        .into(),
+                        EnumVariantId { parent: e, local_id: idx }.into(),
                         &v.variant_data,
                     )
                 })
@@ -80,8 +76,7 @@ pub fn layout_of_adt_query(
         .collect::<SmallVec<[_; 1]>>();
     let variants = variants.iter().map(|it| it.iter().collect()).collect();
     let result = if matches!(def, AdtId::UnionId(..)) {
-        cx.layout_of_union(&repr, &variants)
-            .ok_or(LayoutError::Unknown)?
+        cx.layout_of_union(&repr, &variants).ok_or(LayoutError::Unknown)?
     } else {
         cx.layout_of_struct_or_enum(
             &repr,
@@ -92,12 +87,8 @@ pub fn layout_of_adt_query(
             |min, max| repr_discr(&dl, &repr, min, max).unwrap_or((Integer::I8, false)),
             variants.iter_enumerated().filter_map(|(id, _)| {
                 let AdtId::EnumId(e) = def else { return None };
-                let d = db
-                    .const_eval_discriminant(EnumVariantId {
-                        parent: e,
-                        local_id: id.0,
-                    })
-                    .ok()?;
+                let d =
+                    db.const_eval_discriminant(EnumVariantId { parent: e, local_id: id.0 }).ok()?;
                 Some((id, d))
             }),
             // FIXME: The current code for niche-filling relies on variant indices
@@ -135,10 +126,7 @@ fn layout_scalar_valid_range(db: &dyn HirDatabase, def: AdtId) -> (Bound<u128>, 
         }
         Bound::Unbounded
     };
-    (
-        get("rustc_layout_scalar_valid_range_start"),
-        get("rustc_layout_scalar_valid_range_end"),
-    )
+    (get("rustc_layout_scalar_valid_range_start"), get("rustc_layout_scalar_valid_range_end"))
 }
 
 pub fn layout_of_adt_recover(
@@ -170,11 +158,7 @@ fn repr_discr(
 
     if let Some(ity) = repr.int {
         let discr = Integer::from_attr(dl, ity);
-        let fit = if ity.is_signed() {
-            signed_fit
-        } else {
-            unsigned_fit
-        };
+        let fit = if ity.is_signed() { signed_fit } else { unsigned_fit };
         if discr < fit {
             return Err(LayoutError::UserError(
                 "Integer::repr_discr: `#[repr]` hint too small for \

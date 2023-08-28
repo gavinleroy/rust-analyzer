@@ -284,30 +284,15 @@ fn ever_initialized_map(
             | TerminatorKind::Abort
             | TerminatorKind::Return
             | TerminatorKind::Unreachable => vec![],
-            TerminatorKind::Call {
-                target,
-                cleanup,
-                destination,
-                ..
-            } => {
+            TerminatorKind::Call { target, cleanup, destination, .. } => {
                 if destination.projection.len() == 0 && destination.local == l {
                     is_ever_initialized = true;
                 }
-                target
-                    .into_iter()
-                    .chain(cleanup.into_iter())
-                    .copied()
-                    .collect()
+                target.into_iter().chain(cleanup.into_iter()).copied().collect()
             }
-            TerminatorKind::Drop {
-                target,
-                unwind,
-                place: _,
-            } => Some(target)
-                .into_iter()
-                .chain(unwind.into_iter())
-                .copied()
-                .collect(),
+            TerminatorKind::Drop { target, unwind, place: _ } => {
+                Some(target).into_iter().chain(unwind.into_iter()).copied().collect()
+            }
             TerminatorKind::DropAndReplace { .. }
             | TerminatorKind::Assert { .. }
             | TerminatorKind::Yield { .. }
@@ -400,11 +385,7 @@ fn mutability_of_locals(
             | TerminatorKind::Yield { .. } => (),
             TerminatorKind::Call { destination, .. } => {
                 if destination.projection.len() == 0 {
-                    if ever_init_map
-                        .get(destination.local)
-                        .copied()
-                        .unwrap_or_default()
-                    {
+                    if ever_init_map.get(destination.local).copied().unwrap_or_default() {
                         push_mut_span(destination.local, MirSpan::Unknown);
                     } else {
                         ever_init_map.insert(destination.local, true);

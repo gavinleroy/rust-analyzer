@@ -320,9 +320,9 @@ impl Evaluator<'_> {
                 Err(MirEvalError::Panic(message))
             }
             SliceLen => {
-                let arg = args.next().ok_or(MirEvalError::TypeError(
-                    "argument of <[T]>::len() is not provided",
-                ))?;
+                let arg = args
+                    .next()
+                    .ok_or(MirEvalError::TypeError("argument of <[T]>::len() is not provided"))?;
                 let ptr_size = arg.len() / 2;
                 Ok(arg[ptr_size..].into())
             }
@@ -809,11 +809,7 @@ impl Evaluator<'_> {
                 let bits = destination.size * 8;
                 // FIXME: signed
                 let is_signed = false;
-                let mx: u128 = if is_signed {
-                    (1 << (bits - 1)) - 1
-                } else {
-                    (1 << bits) - 1
-                };
+                let mx: u128 = if is_signed { (1 << (bits - 1)) - 1 } else { (1 << bits) - 1 };
                 // FIXME: signed
                 let mn: u128 = 0;
                 let ans = cmp::min(mx, cmp::max(mn, ans));
@@ -1236,10 +1232,8 @@ impl Evaluator<'_> {
             return Err(MirEvalError::TypeError("atomic intrinsic arg0 is not provided"));
         };
         let arg0_addr = Address::from_bytes(arg0.get(self)?)?;
-        let arg0_interval = Interval::new(
-            arg0_addr,
-            self.size_of_sized(ty, locals, "atomic intrinsic type arg")?,
-        );
+        let arg0_interval =
+            Interval::new(arg0_addr, self.size_of_sized(ty, locals, "atomic intrinsic type arg")?);
         if name.starts_with("load_") {
             return destination.write_from_interval(self, arg0_interval);
         }
@@ -1315,11 +1309,8 @@ impl Evaluator<'_> {
                 layout.size.bytes_usize(),
                 &layout,
                 None,
-                [
-                    IntervalOrOwned::Borrowed(dest.0),
-                    IntervalOrOwned::Owned(vec![u8::from(dest.1)]),
-                ]
-                .into_iter(),
+                [IntervalOrOwned::Borrowed(dest.0), IntervalOrOwned::Owned(vec![u8::from(dest.1)])]
+                    .into_iter(),
             )?;
             return destination.write_from_bytes(self, &result);
         }

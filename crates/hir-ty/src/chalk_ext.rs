@@ -213,15 +213,12 @@ impl TyExt for Ty {
             // invariant ensured by `TyLoweringContext::lower_dyn_trait()`.
             // FIXME: dyn types may not have principal trait and we don't want to return auto trait
             // here.
-            TyKind::Dyn(dyn_ty) => dyn_ty
-                .bounds
-                .skip_binders()
-                .interned()
-                .get(0)
-                .and_then(|b| match b.skip_binders() {
+            TyKind::Dyn(dyn_ty) => dyn_ty.bounds.skip_binders().interned().get(0).and_then(|b| {
+                match b.skip_binders() {
                     WhereClause::Implemented(trait_ref) => Some(trait_ref),
                     _ => None,
-                }),
+                }
+            }),
             _ => None,
         }?;
         Some(from_chalk_trait_id(trait_ref.trait_id))
@@ -245,9 +242,8 @@ impl TyExt for Ty {
                 match db.lookup_intern_impl_trait_id((*opaque_ty_id).into()) {
                     ImplTraitId::AsyncBlockTypeImplTrait(def, _expr) => {
                         let krate = def.module(db.upcast()).krate();
-                        if let Some(future_trait) = db
-                            .lang_item(krate, LangItem::Future)
-                            .and_then(|item| item.as_trait())
+                        if let Some(future_trait) =
+                            db.lang_item(krate, LangItem::Future).and_then(|item| item.as_trait())
                         {
                             // This is only used by type walking.
                             // Parameters will be walked outside, and projection predicate is not used.
@@ -266,12 +262,9 @@ impl TyExt for Ty {
                     }
                     ImplTraitId::ReturnTypeImplTrait(func, idx) => {
                         db.return_type_impl_traits(func).map(|it| {
-                            let data = (*it)
-                                .as_ref()
-                                .map(|rpit| rpit.impl_traits[idx].bounds.clone());
-                            data.substitute(Interner, &subst)
-                                .into_value_and_skipped_binders()
-                                .0
+                            let data =
+                                (*it).as_ref().map(|rpit| rpit.impl_traits[idx].bounds.clone());
+                            data.substitute(Interner, &subst).into_value_and_skipped_binders().0
                         })
                     }
                 }
@@ -281,9 +274,8 @@ impl TyExt for Ty {
                 {
                     ImplTraitId::ReturnTypeImplTrait(func, idx) => {
                         db.return_type_impl_traits(func).map(|it| {
-                            let data = (*it)
-                                .as_ref()
-                                .map(|rpit| rpit.impl_traits[idx].bounds.clone());
+                            let data =
+                                (*it).as_ref().map(|rpit| rpit.impl_traits[idx].bounds.clone());
                             data.substitute(Interner, &opaque_ty.substitution)
                         })
                     }
@@ -382,14 +374,8 @@ impl TyExt for Ty {
                 mutability == mutability2
             }
             (
-                TyKind::Function(FnPointer {
-                    num_binders, sig, ..
-                }),
-                TyKind::Function(FnPointer {
-                    num_binders: num_binders2,
-                    sig: sig2,
-                    ..
-                }),
+                TyKind::Function(FnPointer { num_binders, sig, .. }),
+                TyKind::Function(FnPointer { num_binders: num_binders2, sig: sig2, .. }),
             ) => num_binders == num_binders2 && sig == sig2,
             (TyKind::Tuple(cardinality, _), TyKind::Tuple(cardinality2, _)) => {
                 cardinality == cardinality2
@@ -410,25 +396,16 @@ pub trait ProjectionTyExt {
 impl ProjectionTyExt for ProjectionTy {
     fn trait_ref(&self, db: &dyn HirDatabase) -> TraitRef {
         // FIXME: something like `Split` trait from chalk-solve might be nice.
-        let generics = generics(
-            db.upcast(),
-            from_assoc_type_id(self.associated_ty_id).into(),
-        );
+        let generics = generics(db.upcast(), from_assoc_type_id(self.associated_ty_id).into());
         let substitution = Substitution::from_iter(
             Interner,
             self.substitution.iter(Interner).skip(generics.len_self()),
         );
-        TraitRef {
-            trait_id: to_chalk_trait_id(self.trait_(db)),
-            substitution,
-        }
+        TraitRef { trait_id: to_chalk_trait_id(self.trait_(db)), substitution }
     }
 
     fn trait_(&self, db: &dyn HirDatabase) -> TraitId {
-        match from_assoc_type_id(self.associated_ty_id)
-            .lookup(db.upcast())
-            .container
-        {
+        match from_assoc_type_id(self.associated_ty_id).lookup(db.upcast()).container {
             ItemContainerId::TraitId(it) => it,
             _ => panic!("projection ty without parent trait"),
         }
@@ -445,14 +422,10 @@ pub trait DynTyExt {
 
 impl DynTyExt for DynTy {
     fn principal(&self) -> Option<&TraitRef> {
-        self.bounds
-            .skip_binders()
-            .interned()
-            .get(0)
-            .and_then(|b| match b.skip_binders() {
-                crate::WhereClause::Implemented(trait_ref) => Some(trait_ref),
-                _ => None,
-            })
+        self.bounds.skip_binders().interned().get(0).and_then(|b| match b.skip_binders() {
+            crate::WhereClause::Implemented(trait_ref) => Some(trait_ref),
+            _ => None,
+        })
     }
 }
 

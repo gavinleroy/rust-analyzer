@@ -566,7 +566,7 @@ impl<'a> InferenceTable<'a> {
             resolved = false;
             self.pending_obligations.push((key, canonicalized.clone()));
         }
-        tracing::debug!("RESOLVING {} {:?}", resolved, canonicalized);
+        // eprintln!("RESOLVING {} {:?}", resolved, canonicalized);
     }
 
     pub(crate) fn register_infer_ok<T>(&mut self, infer_ok: InferOk<T>) {
@@ -698,6 +698,8 @@ impl<'a> InferenceTable<'a> {
             canonicalized.value.clone(),
             Some(key),
         );
+
+        eprintln!("TRY:\n  {:?}\n  {:?}", canonicalized.value, solution);
 
         match solution {
             Some(Solution::Unique(canonical_subst)) => {

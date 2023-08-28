@@ -53,10 +53,7 @@ impl MirBody {
                 w!(
                     this,
                     "const {}: _ = ",
-                    data.name
-                        .as_ref()
-                        .unwrap_or(&Name::missing())
-                        .display(db.upcast())
+                    data.name.as_ref().unwrap_or(&Name::missing()).display(db.upcast())
                 );
             }
             hir_def::DefWithBodyId::VariantId(id) => {
@@ -117,12 +114,7 @@ impl HirDisplay for LocalName {
         match self {
             LocalName::Unknown(l) => write!(f, "_{}", u32::from(l.into_raw())),
             LocalName::Binding(n, l) => {
-                write!(
-                    f,
-                    "{}_{}",
-                    n.display(f.db.upcast()),
-                    u32::from(l.into_raw())
-                )
+                write!(f, "{}_{}", n.display(f.db.upcast()), u32::from(l.into_raw()))
             }
         }
     }
@@ -231,18 +223,10 @@ impl<'a> MirPrettyCtx<'a> {
                             wln!(this, ";");
                         }
                         StatementKind::StorageDead(p) => {
-                            wln!(
-                                this,
-                                "StorageDead({})",
-                                this.local_name(*p).display(self.db)
-                            );
+                            wln!(this, "StorageDead({})", this.local_name(*p).display(self.db));
                         }
                         StatementKind::StorageLive(p) => {
-                            wln!(
-                                this,
-                                "StorageLive({})",
-                                this.local_name(*p).display(self.db)
-                            );
+                            wln!(this, "StorageLive({})", this.local_name(*p).display(self.db));
                         }
                         StatementKind::Deinit(p) => {
                             w!(this, "Deinit(");
@@ -268,13 +252,7 @@ impl<'a> MirPrettyCtx<'a> {
                                 wln!(this, "_ => {},", this.basic_block_id(targets.otherwise()));
                             });
                         }
-                        TerminatorKind::Call {
-                            func,
-                            args,
-                            destination,
-                            target,
-                            ..
-                        } => {
+                        TerminatorKind::Call { func, args, destination, target, .. } => {
                             w!(this, "Call ");
                             this.with_block(|this| {
                                 w!(this, "func: ");
@@ -462,7 +440,6 @@ impl<'a> MirPrettyCtx<'a> {
     }
 
     fn hir_display<T: HirDisplay>(&self, ty: &'a T) -> impl Display + 'a {
-        ty.display(self.db)
-            .with_closure_style(ClosureStyle::ClosureWithSubst)
+        ty.display(self.db).with_closure_style(ClosureStyle::ClosureWithSubst)
     }
 }

@@ -1,10 +1,10 @@
 //! Defines `Body`: a lowered representation of bodies of functions, statics and
 //! consts.
 mod lower;
-mod pretty;
-pub mod scope;
 #[cfg(test)]
 mod tests;
+pub mod scope;
+mod pretty;
 
 use std::ops::Index;
 
@@ -105,31 +105,12 @@ pub struct SyntheticSyntax;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum BodyDiagnostic {
-    InactiveCode {
-        node: InFile<SyntaxNodePtr>,
-        cfg: CfgExpr,
-        opts: CfgOptions,
-    },
-    MacroError {
-        node: InFile<AstPtr<ast::MacroCall>>,
-        message: String,
-    },
-    UnresolvedProcMacro {
-        node: InFile<AstPtr<ast::MacroCall>>,
-        krate: CrateId,
-    },
-    UnresolvedMacroCall {
-        node: InFile<AstPtr<ast::MacroCall>>,
-        path: ModPath,
-    },
-    UnreachableLabel {
-        node: InFile<AstPtr<ast::Lifetime>>,
-        name: Name,
-    },
-    UndeclaredLabel {
-        node: InFile<AstPtr<ast::Lifetime>>,
-        name: Name,
-    },
+    InactiveCode { node: InFile<SyntaxNodePtr>, cfg: CfgExpr, opts: CfgOptions },
+    MacroError { node: InFile<AstPtr<ast::MacroCall>>, message: String },
+    UnresolvedProcMacro { node: InFile<AstPtr<ast::MacroCall>>, krate: CrateId },
+    UnresolvedMacroCall { node: InFile<AstPtr<ast::MacroCall>>, path: ModPath },
+    UnreachableLabel { node: InFile<AstPtr<ast::Lifetime>>, name: Name },
+    UndeclaredLabel { node: InFile<AstPtr<ast::Lifetime>>, name: Name },
 }
 
 impl Body {
@@ -147,9 +128,6 @@ impl Body {
                     let data = db.function_data(f);
                     let f = f.lookup(db);
                     let src = f.source(db);
-
-                    tracing::debug!(?f, ?data, ?src, "DefWithBodyId::FunctionId(..)");
-
                     params = src.value.param_list().map(|param_list| {
                         let item_tree = f.id.item_tree(db);
                         let func = &item_tree[f.id.value];
@@ -202,9 +180,7 @@ impl Body {
         &'a self,
         db: &'a dyn DefDatabase,
     ) -> impl Iterator<Item = (BlockId, Arc<DefMap>)> + '_ {
-        self.block_scopes
-            .iter()
-            .map(move |&block| (block, db.block_def_map(block)))
+        self.block_scopes.iter().map(move |&block| (block, db.block_def_map(block)))
     }
 
     pub fn pretty_print(&self, db: &dyn DefDatabase, owner: DefWithBodyId) -> String {
@@ -279,11 +255,7 @@ impl Body {
                 args.iter().copied().for_each(|p| f(p));
             }
             Pat::Ref { pat, .. } => f(*pat),
-            Pat::Slice {
-                prefix,
-                slice,
-                suffix,
-            } => {
+            Pat::Slice { prefix, slice, suffix } => {
                 let total_iter = prefix.iter().chain(slice.iter()).chain(suffix.iter());
                 total_iter.copied().for_each(|p| f(p));
             }
@@ -409,10 +381,7 @@ impl BodySourceMap {
     }
 
     pub fn macro_expansion_expr(&self, node: InFile<&ast::MacroExpr>) -> Option<ExprId> {
-        let src = node
-            .map(AstPtr::new)
-            .map(AstPtr::upcast::<ast::MacroExpr>)
-            .map(AstPtr::upcast);
+        let src = node.map(AstPtr::new).map(AstPtr::upcast::<ast::MacroExpr>).map(AstPtr::upcast);
         self.expr_map.get(&src).copied()
     }
 

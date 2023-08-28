@@ -20,11 +20,11 @@ use hir_def::{
 };
 use la_arena::{Arena, ArenaMap, Idx, RawIdx};
 
-mod borrowck;
 mod eval;
 mod lower;
-mod monomorphization;
+mod borrowck;
 mod pretty;
+mod monomorphization;
 
 pub use borrowck::{borrowck_query, BorrowckResult, MutabilityReason};
 pub use eval::{
@@ -98,10 +98,7 @@ pub enum Operand {
 
 impl Operand {
     fn from_concrete_const(data: Vec<u8>, memory_map: MemoryMap, ty: Ty) -> Self {
-        Operand::Constant(intern_const_scalar(
-            ConstScalar::Bytes(data, memory_map),
-            ty,
-        ))
+        Operand::Constant(intern_const_scalar(ConstScalar::Bytes(data, memory_map), ty))
     }
 
     fn from_bytes(data: Vec<u8>, ty: Ty) -> Self {
@@ -117,11 +114,9 @@ impl Operand {
         func_id: hir_def::FunctionId,
         generic_args: Substitution,
     ) -> Operand {
-        let ty = chalk_ir::TyKind::FnDef(
-            CallableDefId::FunctionId(func_id).to_chalk(db),
-            generic_args,
-        )
-        .intern(Interner);
+        let ty =
+            chalk_ir::TyKind::FnDef(CallableDefId::FunctionId(func_id).to_chalk(db), generic_args)
+                .intern(Interner);
         Operand::from_bytes(vec![], ty)
     }
 }
@@ -162,10 +157,7 @@ impl<V, T> ProjectionElem<V, T> {
                     subst.at(Interner, 0).assert_ty_ref(Interner).clone()
                 }
                 _ => {
-                    never!(
-                        "Overloaded deref on type {} is not a projection",
-                        base.display(db)
-                    );
+                    never!("Overloaded deref on type {} is not a projection", base.display(db));
                     return TyKind::Error.intern(Interner);
                 }
             },
@@ -246,31 +238,20 @@ impl Place {
     fn iterate_over_parents(&self) -> impl Iterator<Item = Place> + '_ {
         (0..self.projection.len())
             .map(|x| &self.projection[0..x])
-            .map(|x| Place {
-                local: self.local,
-                projection: x.to_vec().into(),
-            })
+            .map(|x| Place { local: self.local, projection: x.to_vec().into() })
     }
 
     fn project(&self, projection: PlaceElem) -> Place {
         Place {
             local: self.local,
-            projection: self
-                .projection
-                .iter()
-                .cloned()
-                .chain([projection])
-                .collect(),
+            projection: self.projection.iter().cloned().chain([projection]).collect(),
         }
     }
 }
 
 impl From<LocalId> for Place {
     fn from(local: LocalId) -> Self {
-        Self {
-            local,
-            projection: vec![].into(),
-        }
+        Self { local, projection: vec![].into() }
     }
 }
 
@@ -324,10 +305,7 @@ impl SwitchTargets {
     /// Builds a switch targets definition that jumps to `then` if the tested value equals `value`,
     /// and to `else_` if not.
     pub fn static_if(value: u128, then: BasicBlockId, else_: BasicBlockId) -> Self {
-        Self {
-            values: smallvec![value],
-            targets: smallvec![then, else_],
-        }
+        Self { values: smallvec![value], targets: smallvec![then, else_] }
     }
 
     /// Returns the fallback target that is jumped to when none of the values match the operand.
@@ -354,9 +332,7 @@ impl SwitchTargets {
     /// specific value. This cannot fail, as it'll return the `otherwise`
     /// branch if there's not a specific match for the value.
     pub fn target_for_value(&self, value: u128) -> BasicBlockId {
-        self.iter()
-            .find_map(|(v, t)| (v == value).then_some(t))
-            .unwrap_or_else(|| self.otherwise())
+        self.iter().find_map(|(v, t)| (v == value).then_some(t)).unwrap_or_else(|| self.otherwise())
     }
 }
 
@@ -434,11 +410,7 @@ pub enum TerminatorKind {
     /// > The drop glue is executed if, among all statements executed within this `Body`, an assignment to
     /// > the place or one of its "parents" occurred more recently than a move out of it. This does not
     /// > consider indirect assignments.
-    Drop {
-        place: Place,
-        target: BasicBlockId,
-        unwind: Option<BasicBlockId>,
-    },
+    Drop { place: Place, target: BasicBlockId, unwind: Option<BasicBlockId> },
 
     /// Drops the place and assigns a new value to it.
     ///
@@ -670,18 +642,14 @@ impl BorrowKind {
     fn from_hir(m: hir_def::type_ref::Mutability) -> Self {
         match m {
             hir_def::type_ref::Mutability::Shared => BorrowKind::Shared,
-            hir_def::type_ref::Mutability::Mut => BorrowKind::Mut {
-                allow_two_phase_borrow: false,
-            },
+            hir_def::type_ref::Mutability::Mut => BorrowKind::Mut { allow_two_phase_borrow: false },
         }
     }
 
     fn from_chalk(m: Mutability) -> Self {
         match m {
             Mutability::Not => BorrowKind::Shared,
-            Mutability::Mut => BorrowKind::Mut {
-                allow_two_phase_borrow: false,
-            },
+            Mutability::Mut => BorrowKind::Mut { allow_two_phase_borrow: false },
         }
     }
 }
@@ -802,22 +770,10 @@ impl From<hir_def::hir::CmpOp> for BinOp {
         match value {
             hir_def::hir::CmpOp::Eq { negated: false } => BinOp::Eq,
             hir_def::hir::CmpOp::Eq { negated: true } => BinOp::Ne,
-            hir_def::hir::CmpOp::Ord {
-                ordering: Ordering::Greater,
-                strict: false,
-            } => BinOp::Ge,
-            hir_def::hir::CmpOp::Ord {
-                ordering: Ordering::Greater,
-                strict: true,
-            } => BinOp::Gt,
-            hir_def::hir::CmpOp::Ord {
-                ordering: Ordering::Less,
-                strict: false,
-            } => BinOp::Le,
-            hir_def::hir::CmpOp::Ord {
-                ordering: Ordering::Less,
-                strict: true,
-            } => BinOp::Lt,
+            hir_def::hir::CmpOp::Ord { ordering: Ordering::Greater, strict: false } => BinOp::Ge,
+            hir_def::hir::CmpOp::Ord { ordering: Ordering::Greater, strict: true } => BinOp::Gt,
+            hir_def::hir::CmpOp::Ord { ordering: Ordering::Less, strict: false } => BinOp::Le,
+            hir_def::hir::CmpOp::Ord { ordering: Ordering::Less, strict: true } => BinOp::Lt,
         }
     }
 }
@@ -1113,12 +1069,7 @@ impl MirBody {
                         f(place);
                         for_operand(value, &mut f);
                     }
-                    TerminatorKind::Call {
-                        func,
-                        args,
-                        destination,
-                        ..
-                    } => {
+                    TerminatorKind::Call { func, args, destination, .. } => {
                         for_operand(func, &mut f);
                         args.iter_mut().for_each(|x| for_operand(x, &mut f));
                         f(destination);
@@ -1126,9 +1077,7 @@ impl MirBody {
                     TerminatorKind::Assert { cond, .. } => {
                         for_operand(cond, &mut f);
                     }
-                    TerminatorKind::Yield {
-                        value, resume_arg, ..
-                    } => {
+                    TerminatorKind::Yield { value, resume_arg, .. } => {
                         for_operand(value, &mut f);
                         f(resume_arg);
                     }
@@ -1154,11 +1103,7 @@ impl MirBody {
         param_locals.shrink_to_fit();
         closures.shrink_to_fit();
         for (_, b) in basic_blocks.iter_mut() {
-            let BasicBlock {
-                statements,
-                terminator: _,
-                is_cleanup: _,
-            } = b;
+            let BasicBlock { statements, terminator: _, is_cleanup: _ } = b;
             statements.shrink_to_fit();
         }
     }

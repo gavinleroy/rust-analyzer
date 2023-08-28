@@ -55,12 +55,7 @@ impl<D> TyBuilder<D> {
         parent_subst: Option<Substitution>,
     ) -> Self {
         let parent_subst = parent_subst.unwrap_or_else(|| Substitution::empty(Interner));
-        Self {
-            data,
-            vec: SmallVec::with_capacity(param_kinds.len()),
-            param_kinds,
-            parent_subst,
-        }
+        Self { data, vec: SmallVec::with_capacity(param_kinds.len()), param_kinds, parent_subst }
     }
 
     fn new_empty(data: D) -> Self {
@@ -68,20 +63,13 @@ impl<D> TyBuilder<D> {
     }
 
     fn build_internal(self) -> (D, Substitution) {
-        assert_eq!(
-            self.vec.len(),
-            self.param_kinds.len(),
-            "{:?}",
-            &self.param_kinds
-        );
+        assert_eq!(self.vec.len(), self.param_kinds.len(), "{:?}", &self.param_kinds);
         for (a, e) in self.vec.iter().zip(self.param_kinds.iter()) {
             self.assert_match_kind(a, e);
         }
         let subst = Substitution::from_iter(
             Interner,
-            self.vec
-                .into_iter()
-                .chain(self.parent_subst.iter(Interner).cloned()),
+            self.vec.into_iter().chain(self.parent_subst.iter(Interner).cloned()),
         );
         (self.data, subst)
     }
@@ -116,12 +104,11 @@ impl<D> TyBuilder<D> {
         let other = &this.param_kinds[this.vec.len()..];
         let filler = (starting_from..).zip(other).map(|(idx, kind)| match kind {
             ParamKind::Type => BoundVar::new(debruijn, idx).to_ty(Interner).cast(Interner),
-            ParamKind::Const(ty) => BoundVar::new(debruijn, idx)
-                .to_const(Interner, ty.clone())
-                .cast(Interner),
+            ParamKind::Const(ty) => {
+                BoundVar::new(debruijn, idx).to_const(Interner, ty.clone()).cast(Interner)
+            }
         });
-        this.vec
-            .extend(filler.take(this.remaining()).casted(Interner));
+        this.vec.extend(filler.take(this.remaining()).casted(Interner));
         assert_eq!(this.remaining(), 0);
         this
     }
@@ -146,8 +133,7 @@ impl<D> TyBuilder<D> {
     }
 
     pub fn fill(mut self, filler: impl FnMut(&ParamKind) -> GenericArg) -> Self {
-        self.vec
-            .extend(self.param_kinds[self.vec.len()..].iter().map(filler));
+        self.vec.extend(self.param_kinds[self.vec.len()..].iter().map(filler));
         assert_eq!(self.remaining(), 0);
         self
     }
@@ -253,9 +239,8 @@ impl TyBuilder<()> {
     /// This method prepopulates the builder with placeholder substitution of `parent`, so you
     /// should only push exactly 3 `GenericArg`s before building.
     pub fn subst_for_generator(db: &dyn HirDatabase, parent: DefWithBodyId) -> TyBuilder<()> {
-        let parent_subst = parent
-            .as_generic_def_id()
-            .map(|p| generics(db.upcast(), p).placeholder_subst(db));
+        let parent_subst =
+            parent.as_generic_def_id().map(|p| generics(db.upcast(), p).placeholder_subst(db));
         // These represent resume type, yield type, and return type of generator.
         let params = std::iter::repeat(ParamKind::Type).take(3).collect();
         TyBuilder::new((), params, parent_subst)
@@ -274,11 +259,7 @@ impl TyBuilder<()> {
         Substitution::from_iter(
             Interner,
             self_subst
-                .chain(
-                    generics(db.upcast(), parent)
-                        .placeholder_subst(db)
-                        .iter(Interner),
-                )
+                .chain(generics(db.upcast(), parent).placeholder_subst(db).iter(Interner))
                 .cloned()
                 .collect::<Vec<_>>(),
         )
@@ -321,12 +302,7 @@ impl TyBuilder<hir_def::AdtId> {
                     .chain(iter::repeat(dummy_ty.clone()))
                     .take(self.param_kinds.len()),
             );
-            self.vec.push(
-                default_ty
-                    .clone()
-                    .substitute(Interner, &subst_so_far)
-                    .cast(Interner),
-            );
+            self.vec.push(default_ty.clone().substitute(Interner, &subst_so_far).cast(Interner));
         }
         self
     }
@@ -340,11 +316,7 @@ impl TyBuilder<hir_def::AdtId> {
 pub struct Tuple(usize);
 impl TyBuilder<Tuple> {
     pub fn tuple(size: usize) -> TyBuilder<Tuple> {
-        TyBuilder::new(
-            Tuple(size),
-            iter::repeat(ParamKind::Type).take(size).collect(),
-            None,
-        )
+        TyBuilder::new(Tuple(size), iter::repeat(ParamKind::Type).take(size).collect(), None)
     }
 
     pub fn build(self) -> Ty {
@@ -359,11 +331,8 @@ impl TyBuilder<Tuple> {
     {
         let elements = elements.into_iter();
         let len = elements.len();
-        let mut b = TyBuilder::new(
-            Tuple(len),
-            iter::repeat(ParamKind::Type).take(len).collect(),
-            None,
-        );
+        let mut b =
+            TyBuilder::new(Tuple(len), iter::repeat(ParamKind::Type).take(len).collect(), None);
         for e in elements {
             b = b.push(e);
         }
@@ -378,10 +347,7 @@ impl TyBuilder<TraitId> {
 
     pub fn build(self) -> TraitRef {
         let (trait_id, substitution) = self.build_internal();
-        TraitRef {
-            trait_id: to_chalk_trait_id(trait_id),
-            substitution,
-        }
+        TraitRef { trait_id: to_chalk_trait_id(trait_id), substitution }
     }
 }
 
@@ -396,10 +362,7 @@ impl TyBuilder<TypeAliasId> {
 
     pub fn build(self) -> ProjectionTy {
         let (type_alias, substitution) = self.build_internal();
-        ProjectionTy {
-            associated_ty_id: to_assoc_type_id(type_alias),
-            substitution,
-        }
+        ProjectionTy { associated_ty_id: to_assoc_type_id(type_alias), substitution }
     }
 }
 
