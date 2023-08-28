@@ -14,7 +14,7 @@ use argus::{
     topology::{HasTopology, TreeTopology},
 };
 
-use super::{writer::DeepDebug, *, utils::*};
+use super::{utils::*, writer::DeepDebug, *};
 use crate::{infer::unify::InferenceTable, HirDatabase, Interner};
 
 fn wrap_goal(s: String) -> GoalInfo {
@@ -64,19 +64,11 @@ impl From<TracedTraitQuery<'_>> for SerializeTree {
         let relationship = FxHashMap::default();
 
         match kind {
-            AttemptKind::Try(QueryAttempt {
-                context,
-                canonicalized,
-                solution,
-                trace,
-            }) => {
+            AttemptKind::Try(QueryAttempt { context, canonicalized, solution, trace }) => {
+                let trace = trace.without_obligations();
                 let tctx = TreeContext {
                     db: context.db,
-                    ir: &ChalkContext {
-                        db: context.db,
-                        krate,
-                        block,
-                    },
+                    ir: &ChalkContext { db: context.db, krate, block },
                     infer: &context,
                     proof: &trace,
                 };
@@ -88,13 +80,7 @@ impl From<TracedTraitQuery<'_>> for SerializeTree {
                         new_nodes.push(n)
                     });
 
-                SerializeTree {
-                    root: new_root,
-                    nodes: new_nodes,
-                    children,
-                    parent,
-                    relationship,
-                }
+                SerializeTree { root: new_root, nodes: new_nodes, children, parent, relationship }
             }
             AttemptKind::Required(attempts) => {
                 let mut new_nodes = IndexVec::default();
@@ -103,20 +89,12 @@ impl From<TracedTraitQuery<'_>> for SerializeTree {
                 let children = attempts
                     .into_iter()
                     .map(|attempt| {
-                        let QueryAttempt {
-                            context,
-                            canonicalized,
-                            solution,
-                            trace,
-                        } = attempt;
+                        let QueryAttempt { context, canonicalized, solution, trace } = attempt;
+                        let trace = trace.without_obligations();
 
                         let tctx = TreeContext {
                             db: context.db,
-                            ir: &ChalkContext {
-                                db: context.db,
-                                krate,
-                                block,
-                            },
+                            ir: &ChalkContext { db: context.db, krate, block },
                             infer: &context,
                             proof: &trace,
                         };
@@ -140,13 +118,7 @@ impl From<TracedTraitQuery<'_>> for SerializeTree {
 
                 let TreeTopology { children, parent } = new_topology;
 
-                SerializeTree {
-                    root,
-                    nodes: new_nodes,
-                    children,
-                    parent,
-                    relationship,
-                }
+                SerializeTree { root, nodes: new_nodes, children, parent, relationship }
             }
         }
     }
@@ -161,9 +133,8 @@ impl TreeContext<'_> {
 
         let path_tr = self.proof.path_to_root(from);
 
-        let inference_path = path_tr
-            .iter()
-            .filter_map(|&idx| self.proof.get_node(idx).inference_info());
+        let inference_path =
+            path_tr.iter().filter_map(|&idx| self.proof.get_node(idx).inference_info());
 
         eprintln!("\n\n\n\n[RESOLVING] {:#?}\n", value);
         let value = inference_path.fold(value, |v, (tbl, subst)| {
@@ -192,18 +163,16 @@ impl TreeContext<'_> {
         let value = self.proof.get_node(idx);
 
         match value {
-            pt::ProofTree::FromClauses(walker) => NodeGoal::Goal {
-                data: self.convert_clauses(idx, walker).tag("CLAUSES"),
-            },
-            pt::ProofTree::Fulfill(walker) => NodeGoal::Goal {
-                data: self.convert_fulfill(idx, walker).tag("FULFILL"),
-            },
-            pt::ProofTree::Obligation(walker) => NodeGoal::Goal {
-                data: self.convert_obligation(idx, walker).tag("OBLIGATION"),
-            },
-            pt::ProofTree::Leaf(leaf) => NodeGoal::Leaf {
-                leaf: self.convert_leaf(idx, leaf),
-            },
+            pt::ProofTree::FromClauses(walker) => {
+                NodeGoal::Goal { data: self.convert_clauses(idx, walker).tag("CLAUSES") }
+            }
+            pt::ProofTree::Fulfill(walker) => {
+                NodeGoal::Goal { data: self.convert_fulfill(idx, walker).tag("FULFILL") }
+            }
+            pt::ProofTree::Obligation(walker) => {
+                NodeGoal::Goal { data: self.convert_obligation(idx, walker).tag("OBLIGATION") }
+            }
+            pt::ProofTree::Leaf(leaf) => NodeGoal::Leaf { leaf: self.convert_leaf(idx, leaf) },
         }
     }
 
@@ -245,9 +214,7 @@ impl TreeContext<'_> {
     fn convert_leaf(&self, idx: ft::ProofNodeIdx, value: &pt::Leaf<Interner>) -> NodeLeaf {
         use std::borrow::Cow;
 
-        let leaf_str = |s: Cow<'_, str>| NodeLeaf::WithString {
-            value: s.to_string(),
-        };
+        let leaf_str = |s: Cow<'_, str>| NodeLeaf::WithString { value: s.to_string() };
 
         leaf_str(sexp_it!(value, self).into())
         // leaf_str(format!("{:?}", value).into())

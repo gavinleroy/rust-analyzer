@@ -56,7 +56,6 @@ where
     pub mapping: FxHashMap<BoundVar, &'b str>,
 }
 
-
 #[allow(dead_code)]
 fn compare_formatting<T>(name: &str, value: T, ctxt: &DebugContext<'_, '_>)
 where
@@ -961,16 +960,6 @@ impl DeepDebug for LifetimeOutlives<Interner> {
 }
 
 impl DeepDebug for TypeOutlives<Interner> {
-    fn fmt_deep(
-        &self,
-        _fmt: &mut Formatter<'_>,
-        _ctxt: &mut DebugContext<'_, '_>,
-    ) -> Result<(), Error> {
-        write!(_fmt, "{:?}", self)
-    }
-}
-
-impl<'a> DeepDebug for ProjectionTyDebug<'a, Interner> {
     fn fmt_deep(
         &self,
         _fmt: &mut Formatter<'_>,

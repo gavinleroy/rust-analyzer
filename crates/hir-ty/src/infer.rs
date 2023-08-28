@@ -71,7 +71,7 @@ pub use coerce::could_coerce;
 pub use unify::could_unify;
 
 use cast::CastCheck;
-pub(crate) use self::closure::{CaptureKind, CapturedItem, CapturedItemWithoutTy};
+pub(crate) use closure::{CaptureKind, CapturedItem, CapturedItemWithoutTy};
 
 /// The entry point of type inference.
 pub(crate) fn infer_query(db: &dyn HirDatabase, def: DefWithBodyId) -> Arc<InferenceResult> {
