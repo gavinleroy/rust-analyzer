@@ -17,8 +17,8 @@ use stdx::panic_context;
 use triomphe::Arc;
 
 use argus::{
-    proof_tree::{ProofTree, TracedFallible},
-    utils::{GraphVizExt, SexpExt},
+    proof_tree::{flat::ProofTreeNav, TracedFallible},
+    utils::GraphVizExt,
 };
 
 use crate::{
@@ -38,14 +38,8 @@ pub(crate) struct ChalkContext<'a> {
 }
 
 fn create_chalk_solver() -> chalk_recursive::RecursiveSolver<Interner> {
-    let overflow_depth = var("CHALK_OVERFLOW_DEPTH")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(500);
-    let max_size = var("CHALK_SOLVER_MAX_SIZE")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(150);
+    let overflow_depth = var("CHALK_OVERFLOW_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(500);
+    let max_size = var("CHALK_SOLVER_MAX_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(150);
     chalk_recursive::RecursiveSolver::new(overflow_depth, max_size, Some(Cache::new()))
 }
 
@@ -98,72 +92,38 @@ pub(crate) fn trait_solve_query(
     block: Option<BlockId>,
     goal: Canonical<InEnvironment<Goal>>,
 ) -> (Option<crate::Solution>, crate::ProofTree) {
-    let internal_solve = || {
-        let context = ChalkContext { db, krate, block };
-        let return_traced = |solution, trace: crate::ProofTree| {
-            if is_trace_graphviz() {
-                trace
-                    .output_dot(&context)
-                    .expect("failed to output traced dot graph");
-            }
+    let _p =
+        profile::span("trait_solve_query").detail(|| match &goal.value.goal.data(Interner) {
+            GoalData::DomainGoal(DomainGoal::Holds(WhereClause::Implemented(it))) => db
+                .trait_data(it.hir_trait_id()).name.display(db.upcast()).to_string(),
+            GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(_))) => "alias_eq".to_string(),
+            _ => "??".to_string(),
+        });
 
-            (solution, trace)
-        };
-
-        let _p =
-            profile::span("trait_solve_query").detail(|| match &goal.value.goal.data(Interner) {
-                GoalData::DomainGoal(DomainGoal::Holds(WhereClause::Implemented(it))) => db
-                    .trait_data(it.hir_trait_id())
-                    .name
-                    .display(db.upcast())
-                    .to_string(),
-                GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(_))) => {
-                    "alias_eq".to_string()
-                }
-                _ => "??".to_string(),
-            });
-
-        if let GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(AliasEq {
-            alias: AliasTy::Projection(projection_ty),
-            ..
-        }))) = &goal.value.goal.data(Interner)
-        {
-            // FIXME(gavinleroy): is it unsound to comment this out, or will it just burn cycles?
-            // if let TyKind::BoundVar(_) = projection_ty.self_type_parameter(db).kind(Interner) {
-            //     // Hack: don't ask Chalk to normalize with an unknown self type, it'll say that's impossible
-            //     return return_traced(
-            //         Some(Solution::Ambig(Guidance::Unknown)),
-            //         ProofTree::unknown(),
-            //     );
-            // }
+    if let GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(AliasEq {
+        alias: AliasTy::Projection(projection_ty),
+        ..
+    }))) = &goal.value.goal.data(Interner)
+    {
+        // FIXME(gavinleroy): is it unsound to comment this out, or will it just burn cycles?
+        if let TyKind::BoundVar(_) = projection_ty.self_type_parameter(db).kind(Interner) {
+            // Hack: don't ask Chalk to normalize with an unknown self type, it'll say that's impossible
+            return (
+                Some(Solution::Ambig(Guidance::Unknown)),
+                ProofTreeNav::from_solution(Ok(Solution::Ambig(Guidance::Unknown))),
+            );
         }
+    }
 
-        // Chalk see `UnevaluatedConst` as a unique concrete value, but we see it as an alias for another const. So
-        // we should get rid of it when talking to chalk.
-        let goal = goal
-            .clone()
-            .try_fold_with(
-                &mut UnevaluatedConstEvaluatorFolder { db },
-                DebruijnIndex::INNERMOST,
-            )
-            .unwrap();
+    // Chalk see `UnevaluatedConst` as a unique concrete value, but we see it as an alias for another const. So
+    // we should get rid of it when talking to chalk.
+    let goal = goal.try_fold_with(&mut UnevaluatedConstEvaluatorFolder { db }, DebruijnIndex::INNERMOST).unwrap();
 
-        // We currently don't deal with universes (I think / hope they're not yet
-        // relevant for our use cases?)
-        let u_canonical = chalk_ir::UCanonical {
-            canonical: goal,
-            universes: 1,
-        };
+    // We currently don't deal with universes (I think / hope they're not yet
+    // relevant for our use cases?)
+    let u_canonical = chalk_ir::UCanonical { canonical: goal, universes: 1 };
 
-        let (sol, t) = solve(db, krate, block, &u_canonical);
-        return_traced(sol, t)
-    };
-
-    internal_solve()
-
-    // crate::db::push_trace(traced_query.clone());
-
-    // (traced_query.solution, traced_query.trace)
+    solve(db, krate, block, &u_canonical)
 }
 
 fn solve(
@@ -194,9 +154,7 @@ fn solve(
         } else {
             None
         };
-        let TracedFallible {
-            solution, trace, ..
-        } = if is_chalk_print() {
+        let TracedFallible { solution, trace, ..  } = if is_chalk_print() {
             let logging_db =
                 LoggingRustIrDatabaseLoggingOnDrop(LoggingRustIrDatabase::new(context));
             // XXX: Dump the graphviz version of the proof tree

@@ -455,9 +455,9 @@ impl InferenceResult {
     }
     pub fn expr_type_mismatches(&self) -> impl Iterator<Item = (ExprId, &TypeMismatch)> {
         self.type_mismatches.iter().filter_map(|(expr_or_pat, mismatch)| match *expr_or_pat {
-                ExprOrPatId::ExprId(expr) => Some((expr, mismatch)),
-                _ => None,
-            })
+            ExprOrPatId::ExprId(expr) => Some((expr, mismatch)),
+            _ => None,
+        })
     }
     pub fn closure_info(&self, closure: &ClosureId) -> &(Vec<CapturedItem>, FnTrait) {
         self.closure_info.get(closure).unwrap()
