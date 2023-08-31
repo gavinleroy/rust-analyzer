@@ -111,3 +111,78 @@ pub struct Unification {}
 
 #[derive(TS, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct UnificationLeaf {}
+
+// ----------------------------------------------
+// Tree modifications (for original ProofTreeNav)
+
+use crate::Interner;
+
+use argus::{
+    proof_tree::{
+        flat::ProofNodeIdx,
+        navigation::{BuildControlFlow, Navigation, TreeView, ViewBuilder},
+    },
+    topology::TreeTopology,
+};
+use hir_def::lang_item::LangItem;
+
+pub(crate) trait NavigationExt {
+    fn without_sized_impls<'a>(
+        &'a self,
+        ctx: &crate::traits::ChalkContext<'_>,
+    ) -> TreeView<'a, Interner>;
+}
+
+impl<T: Navigation<Interner>> NavigationExt for T {
+    fn without_sized_impls<'a>(
+        &'a self,
+        ctx: &crate::traits::ChalkContext<'_>,
+    ) -> TreeView<'a, Interner> {
+        use crate::mapping::to_chalk_trait_id;
+        use chalk_ir::{TraitRef, WhereClause};
+
+        struct Walker<'b> {
+            new_topo: TreeTopology<ProofNodeIdx, ProofNodeIdx>,
+            tree: &'b dyn Navigation<Interner>,
+            ctx: &'b crate::traits::ChalkContext<'b>,
+        }
+
+        impl ViewBuilder<Interner> for Walker<'_> {
+            fn get_nav(&self) -> &dyn Navigation<Interner> {
+                self.tree
+            }
+
+            fn get_new_topology(&mut self) -> &mut TreeTopology<ProofNodeIdx, ProofNodeIdx> {
+                &mut self.new_topo
+            }
+
+            fn node_pred(&self, node: ProofNodeIdx) -> BuildControlFlow {
+                use chalk_ir::WhereClause;
+                let node = self.get_nav().get_node(node);
+
+                let sized_trait = self
+                    .ctx
+                    .db
+                    .lang_item(self.ctx.krate, LangItem::Sized)
+                    .and_then(|item| item.as_trait())
+                    .map(|sized_trait_| to_chalk_trait_id(sized_trait_));
+
+                match (node.as_where_clause(Interner), sized_trait) {
+                    // Remove nodes of the form: `???: Sized`.
+                    (Some(WhereClause::Implemented(TraitRef { trait_id, .. })), Some(sized))
+                        if trait_id == sized =>
+                    {
+                        BuildControlFlow::NoStop
+                    }
+                    _ => BuildControlFlow::YesContinue,
+                }
+            }
+        }
+
+        let mut walker = Walker { new_topo: TreeTopology::new(), tree: &*self, ctx };
+
+        walker.run();
+
+        TreeView { from: self, topology: walker.new_topo }
+    }
+}

@@ -58,6 +58,7 @@ pub(crate) struct TreeContext<'a> {
 
 impl From<TracedTraitQuery<'_>> for SerializeTree {
     fn from(query: TracedTraitQuery<'_>) -> Self {
+        use super::NavigationExt;
         use crate::traits::ChalkContext;
 
         let TracedTraitQuery { krate, block, kind } = query;
@@ -65,13 +66,16 @@ impl From<TracedTraitQuery<'_>> for SerializeTree {
 
         match kind {
             AttemptKind::Try(QueryAttempt { context, canonicalized, solution, trace }) => {
-                let trace = trace.without_obligations();
-                let tctx = TreeContext {
-                    db: context.db,
-                    ir: &ChalkContext { db: context.db, krate, block },
-                    infer: &context,
-                    proof: &trace,
-                };
+                let ir = &ChalkContext { db: context.db, krate, block };
+
+                let trace = trace.without_fromenv(Interner);
+                let trace = trace.without_duplicate_clauses(Interner);
+                let trace = trace.without_obligations(Interner);
+                let trace = trace.without_nonessential_goals(Interner);
+                let trace = trace.without_sized_impls(ir);
+                let trace = trace.prune_branches(Interner);
+
+                let tctx = TreeContext { db: context.db, ir, infer: &context, proof: &trace };
 
                 let mut new_nodes = IndexVec::default();
                 let (new_root, TreeTopology { children, parent }) =
@@ -90,14 +94,17 @@ impl From<TracedTraitQuery<'_>> for SerializeTree {
                     .into_iter()
                     .map(|attempt| {
                         let QueryAttempt { context, canonicalized, solution, trace } = attempt;
-                        let trace = trace.without_obligations();
+                        let ir = &ChalkContext { db: context.db, krate, block };
 
-                        let tctx = TreeContext {
-                            db: context.db,
-                            ir: &ChalkContext { db: context.db, krate, block },
-                            infer: &context,
-                            proof: &trace,
-                        };
+                        let trace = trace.without_fromenv(Interner);
+                        let trace = trace.without_duplicate_clauses(Interner);
+                        let trace = trace.without_obligations(Interner);
+                        let trace = trace.without_nonessential_goals(Interner);
+                        let trace = trace.without_sized_impls(ir);
+                        let trace = trace.prune_branches(Interner);
+
+                        let tctx =
+                            TreeContext { db: context.db, ir, infer: &context, proof: &trace };
 
                         let (new_root, new_topo) =
                             trace.get_topology().map_from(trace.get_root(), |nidx| {
