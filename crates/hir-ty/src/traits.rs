@@ -93,20 +93,19 @@ pub(crate) fn trait_solve_query(
     block: Option<BlockId>,
     goal: Canonical<InEnvironment<Goal>>,
 ) -> (Option<crate::Solution>, crate::ProofTree) {
-    let _p =
-        profile::span("trait_solve_query").detail(|| match &goal.value.goal.data(Interner) {
-            GoalData::DomainGoal(DomainGoal::Holds(WhereClause::Implemented(it))) => db
-                .trait_data(it.hir_trait_id()).name.display(db.upcast()).to_string(),
-            GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(_))) => "alias_eq".to_string(),
-            _ => "??".to_string(),
-        });
+    let _p = profile::span("trait_solve_query").detail(|| match &goal.value.goal.data(Interner) {
+        GoalData::DomainGoal(DomainGoal::Holds(WhereClause::Implemented(it))) => {
+            db.trait_data(it.hir_trait_id()).name.display(db.upcast()).to_string()
+        }
+        GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(_))) => "alias_eq".to_string(),
+        _ => "??".to_string(),
+    });
 
     if let GoalData::DomainGoal(DomainGoal::Holds(WhereClause::AliasEq(AliasEq {
         alias: AliasTy::Projection(projection_ty),
         ..
     }))) = &goal.value.goal.data(Interner)
     {
-        // FIXME(gavinleroy): is it unsound to comment this out, or will it just burn cycles?
         if let TyKind::BoundVar(_) = projection_ty.self_type_parameter(db).kind(Interner) {
             // Hack: don't ask Chalk to normalize with an unknown self type, it'll say that's impossible
             return (
@@ -118,7 +117,9 @@ pub(crate) fn trait_solve_query(
 
     // Chalk see `UnevaluatedConst` as a unique concrete value, but we see it as an alias for another const. So
     // we should get rid of it when talking to chalk.
-    let goal = goal.try_fold_with(&mut UnevaluatedConstEvaluatorFolder { db }, DebruijnIndex::INNERMOST).unwrap();
+    let goal = goal
+        .try_fold_with(&mut UnevaluatedConstEvaluatorFolder { db }, DebruijnIndex::INNERMOST)
+        .unwrap();
 
     // We currently don't deal with universes (I think / hope they're not yet
     // relevant for our use cases?)
@@ -155,7 +156,7 @@ fn solve(
         } else {
             None
         };
-        let TracedFallible { solution, trace, ..  } = if is_chalk_print() {
+        let TracedFallible { solution, trace, .. } = if is_chalk_print() {
             let logging_db =
                 LoggingRustIrDatabaseLoggingOnDrop(LoggingRustIrDatabase::new(context));
             // XXX: Dump the graphviz version of the proof tree

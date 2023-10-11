@@ -1,6 +1,11 @@
+//! **Caution** should be taken when re-generating bindings for parameterized types.
+//! _These often require a tedious round of manual updates._ The current approach is to _remove_ the
+//! `Interner` parameterization. An interner isn't required nor used in TypeScript, and the exported
+//! types are only half correct anyways due to ts-rs's shotty support.
 #![cfg(test)]
 
 use argus::proof_tree as apt;
+use argus::proof_tree::indices as idx;
 
 use chalk_ir::{self as ir, interner::HasInterner as HasInternerTrait};
 use chalk_solve as solve;
@@ -13,9 +18,9 @@ use hir_def::{
 };
 
 use crate::{
-    proof_tree::utils as putils,
     self as krate,
-    interner::{Interner, InternedWrapper},
+    interner::{InternedWrapper, Interner},
+    proof_tree::utils as putils,
 };
 
 use serde::Serialize;
@@ -48,7 +53,8 @@ macro_rules! ts {
                         let manifest_dir = Path::new(&manifest_dir);
                         let s = format!("bindings/{}", $name);
                         let additional = Path::new(&s);
-                        let path = PathBuf::from(<$ty as TS>::EXPORT_TO.ok_or(CannotBeExported).expect("Failed to build export path"));
+                        let fail_str = &format!("Failed to build export path for {}", stringify!($ty));
+                        let path = PathBuf::from(<$ty as TS>::EXPORT_TO.ok_or(CannotBeExported).expect(fail_str));
                         let resolved = manifest_dir.join(additional).join(path);
                         <$ty as TS>::export_to(resolved)
                               .expect(format!("Failed to export TS binding for type '{}'", stringify!($ty)).as_ref());
@@ -207,6 +213,10 @@ fn export_ra_hir_def() {
       def::GenericParamId,
       def::ModuleDefId,
       def::GeneralConstId,
+      def::ConstBlockId,
+      def::InTypeConstId,
+      def::UseId,
+      def::ExternCrateId,
       def::DefWithBodyId,
       def::AssocItemId,
       def::GenericDefId,
@@ -234,6 +244,9 @@ fn export_ra_hir_ty() {
       Interner,
       InternedWrapper<()>,
       putils::InternIdTS,
+      putils::TracedTraitQuery,
+      putils::QueryAttempt,
+      putils::AttemptKind,
 
     }
 }
@@ -243,47 +256,49 @@ fn export_ra_hir_ty() {
 
 #[test]
 fn export_proof_tree() {
-    // XXX: as of now, the proof tree isn't intended
-    //      for frontend consumption, it is merely how
-    //      we do tracing within Chalk, but then it's
-    //      converted into a SerializeTree which has
-    //      a better format. I(gavinleroy) don't yet know
-    //      the best way to capture the Chalk traces, there's
-    //      some funky corners that are rather difficult.
-    //
-    //      This is why almost everything is commented out.
     ts! { "proof-tree",
 
-      // apt::ProofTree<Interner>,
-      // apt::UnifyKind<Interner>,
-      // apt::Opaque::<()>,
-      // apt::EdgeInfo::<Interner>,
-      // apt::PCINode::<Interner>,
-      // apt::NestedNode::<Interner>,
-      // apt::ClauseNode::<Interner>,
-      // apt::LeafNode::<Interner>,
-      // apt::UnifyNode,
+      // mod.rs
+      // idx::InterimGoalIdx,
+      // idx::ObligationIdx,
+      // idx::UnificationIdx,
+      // idx::ProofNodeIdx,
+      // idx::ClauseIdx,
+
+      apt::TreeDescription,
+      apt::ProofTree<Interner>,
       apt::ChildRelKind,
 
-    }
-}
+      // clauses.rs
+      apt::SolveFromClauses<Interner>,
+      apt::ClauseKind,
+      apt::ConsideredClause<Interner>,
 
-#[test]
-fn export_serialize_tree() {
-    // Base types for serialize tree
-    use crate::proof_tree as stpt;
+      // flat.rs
+      apt::ProofTreeNav<Interner>,
 
-    ts! { "serialize-tree",
+      // fulfill.rs
+      apt::IdxKind,
+      apt::Fulfillment<Interner>,
+      apt::FulfillmentKind<Interner>,
+      apt::FulfillFailKind,
+      apt::ObligationNode<Interner>,
+      apt::Obligation<Interner>,
+      apt::ObligationKind,
+      apt::PositiveSolution<Interner>,
+      apt::NegativeSolution,
+      apt::InterimGoal<Interner>,
+      apt::ObligationResult<Interner>,
+      apt::OblResultKind<Interner>,
+      apt::ObligationFixpoint<Interner>,
+      apt::IntermediateGoal<Interner>,
+      apt::Unification<Interner>,
+      apt::UnifyKind<Interner>,
 
-      // XXX: A manual patch exists for indices,
-      //      in `script/ts-bind.py`, because the output type
-      //      isn't correct but adding a manual ts attribute doesn't
-      //      seem to work.
-      // st::NodeIdx,
+      // leaf.rs
+      apt::Leaf<Interner>,
+      apt::LeafKind<Interner>,
 
-      stpt::SerializeTree,
-      stpt::NodeGoal,
-      stpt::GoalInfo,
-      stpt::NodeLeaf,
+      argus::topology::TreeTopology<idx::ProofNodeIdx, idx::ProofNodeIdx>,
     }
 }

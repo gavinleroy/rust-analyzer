@@ -121,6 +121,7 @@ pub type Binders<T> = chalk_ir::Binders<T>;
 pub type Substitution = chalk_ir::Substitution<Interner>;
 pub type GenericArg = chalk_ir::GenericArg<Interner>;
 pub type GenericArgData = chalk_ir::GenericArgData<Interner>;
+pub type CanonicalVarKind = chalk_ir::CanonicalVarKind<Interner>;
 
 pub type Ty = chalk_ir::Ty<Interner>;
 pub type TyKind = chalk_ir::TyKind<Interner>;
@@ -159,6 +160,7 @@ pub type AliasEq = chalk_ir::AliasEq<Interner>;
 pub type Solution = chalk_solve::Solution<Interner>;
 pub type ConstrainedSubst = chalk_ir::ConstrainedSubst<Interner>;
 pub type Guidance = chalk_solve::Guidance<Interner>;
+pub type ProgramClauseImplication = chalk_ir::ProgramClauseImplication<Interner>;
 pub type WhereClause = chalk_ir::WhereClause<Interner>;
 pub type ProofTree = argus::proof_tree::flat::ProofTreeNav<Interner>;
 pub type TracedSolution = (Option<Solution>, ProofTree);
@@ -250,10 +252,7 @@ pub(crate) fn wrap_empty_binders<T>(value: T) -> Binders<T>
 where
     T: TypeFoldable<Interner> + HasInterner<Interner = Interner>,
 {
-    Binders::empty(
-        Interner,
-        value.shifted_in_from(Interner, DebruijnIndex::ONE),
-    )
+    Binders::empty(Interner, value.shifted_in_from(Interner, DebruijnIndex::ONE))
 }
 
 pub(crate) fn make_type_and_const_binders<T: HasInterner<Interner = Interner>>(
@@ -281,9 +280,7 @@ pub(crate) fn make_single_type_binders<T: HasInterner<Interner = Interner>>(
     Binders::new(
         VariableKinds::from_iter(
             Interner,
-            std::iter::once(chalk_ir::VariableKind::Ty(
-                chalk_ir::TyVariableKind::General,
-            )),
+            std::iter::once(chalk_ir::VariableKind::Ty(chalk_ir::TyVariableKind::General)),
         ),
         value,
     )
@@ -334,11 +331,7 @@ impl CallableSig {
         safety: Safety,
     ) -> CallableSig {
         params.push(ret);
-        CallableSig {
-            params_and_return: params.into(),
-            is_varargs,
-            safety,
-        }
+        CallableSig { params_and_return: params.into(), is_varargs, safety }
     }
 
     pub fn from_fn_ptr(fn_ptr: &FnPointer) -> CallableSig {
@@ -365,11 +358,7 @@ impl CallableSig {
     pub fn to_fn_ptr(&self) -> FnPointer {
         FnPointer {
             num_binders: 0,
-            sig: FnSig {
-                abi: (),
-                safety: self.safety,
-                variadic: self.is_varargs,
-            },
+            sig: FnSig { abi: (), safety: self.safety, variadic: self.is_varargs },
             substitution: FnSubst(Substitution::from_iter(
                 Interner,
                 self.params_and_return.iter().cloned(),
@@ -465,10 +454,7 @@ pub(crate) fn fold_free_vars<T: HasInterner<Interner = Interner> + TypeFoldable<
             self.1(ty, bound_var, outer_binder)
         }
     }
-    t.fold_with(
-        &mut FreeVarFolder(for_ty, for_const),
-        DebruijnIndex::INNERMOST,
-    )
+    t.fold_with(&mut FreeVarFolder(for_ty, for_const), DebruijnIndex::INNERMOST)
 }
 
 pub(crate) fn fold_tys<T: HasInterner<Interner = Interner> + TypeFoldable<Interner>>(
@@ -633,10 +619,7 @@ where
         }
     }
     let mut error_replacer = ErrorReplacer { vars: 0 };
-    let value = match t
-        .clone()
-        .try_fold_with(&mut error_replacer, DebruijnIndex::INNERMOST)
-    {
+    let value = match t.clone().try_fold_with(&mut error_replacer, DebruijnIndex::INNERMOST) {
         Ok(t) => t,
         Err(_) => panic!("Encountered unbound or inference vars in {t:?}"),
     };
@@ -646,10 +629,7 @@ where
             chalk_ir::UniverseIndex::ROOT,
         )
     });
-    Canonical {
-        value,
-        binders: chalk_ir::CanonicalVarKinds::from_iter(Interner, kinds),
-    }
+    Canonical { value, binders: chalk_ir::CanonicalVarKinds::from_iter(Interner, kinds) }
 }
 
 pub fn callable_sig_from_fnonce(
@@ -663,9 +643,7 @@ pub fn callable_sig_from_fnonce(
     }
     let krate = env.krate;
     let fn_once_trait = FnTrait::FnOnce.get_id(db, krate)?;
-    let output_assoc_type = db
-        .trait_data(fn_once_trait)
-        .associated_type_by_name(&name![Output])?;
+    let output_assoc_type = db.trait_data(fn_once_trait).associated_type_by_name(&name![Output])?;
 
     let mut table = InferenceTable::new(db, env);
     let b = TyBuilder::trait_ref(db, fn_once_trait);
@@ -690,19 +668,10 @@ pub fn callable_sig_from_fnonce(
     let ret_ty = table.resolve_completely(ret_ty);
     let args_ty = table.resolve_completely(args_ty);
 
-    let params = args_ty
-        .as_tuple()?
-        .iter(Interner)
-        .map(|it| it.assert_ty_ref(Interner))
-        .cloned()
-        .collect();
+    let params =
+        args_ty.as_tuple()?.iter(Interner).map(|it| it.assert_ty_ref(Interner)).cloned().collect();
 
-    Some(CallableSig::from_params_and_return(
-        params,
-        ret_ty,
-        false,
-        Safety::Safe,
-    ))
+    Some(CallableSig::from_params_and_return(params, ret_ty, false, Safety::Safe))
 }
 
 struct PlaceholderCollector<'db> {
@@ -765,10 +734,7 @@ pub fn collect_placeholders<T>(value: &T, db: &dyn HirDatabase) -> Vec<TypeOrCon
 where
     T: ?Sized + TypeVisitable<Interner>,
 {
-    let mut collector = PlaceholderCollector {
-        db,
-        placeholders: FxHashSet::default(),
-    };
+    let mut collector = PlaceholderCollector { db, placeholders: FxHashSet::default() };
     value.visit_with(&mut collector, DebruijnIndex::INNERMOST);
     collector.placeholders.into_iter().collect()
 }

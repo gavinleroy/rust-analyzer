@@ -1,14 +1,12 @@
 //! Implementation of the Chalk `Interner` trait, which allows customizing the
 //! representation of the various objects Chalk deals with (types, goals etc.).
 
-use std::{
-    fmt::Debug,
-    hash::Hash,
-};
+use std::{fmt::Debug, hash::Hash};
 
 use crate::{
+    chalk_db,
     proof_tree::utils::{InternIdTS, InternedTS},
-    chalk_db, tls, ConstScalar, GenericArg, 
+    tls, ConstScalar, GenericArg,
 };
 use chalk_ir::{Goal, GoalData};
 use hir_def::TypeAliasId;
@@ -22,11 +20,16 @@ use serde::Serialize;
 use ts_rs::TS;
 
 #[derive(Debug, Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
-#[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
+#[cfg_attr(all(), derive(TS, Serialize))]
 pub struct Interner;
 
+// FIXME: cfg_attr(all(), ...) needs to be reverted back to
+// cfg_attr(feature = "tserialize"), I'm not sure why the tests were
+// breaking, some dev-dependency was including hir-ty with the feature
+// enabled. (Which shoudln't happen.)
+
 #[derive(PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "tserialize", derive(TS, Serialize))]
+#[cfg_attr(all(), derive(TS, Serialize))]
 pub struct InternedWrapper<T: TSerialize>(pub T);
 
 impl<T: fmt::Debug + TSerialize> fmt::Debug for InternedWrapper<T> {

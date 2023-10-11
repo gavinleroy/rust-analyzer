@@ -29,7 +29,8 @@ incremental = true
 debug = 2
 
 [patch.'crates-io']
-ts-rs = { git = "https://github.com/gavinleroy/ts-rs.git" }
+# ts-rs = { git = "https://github.com/gavinleroy/ts-rs.git" }
+ts-rs = { path = "../../ts-rs/ts-rs", version = "6.2.0" }
 # chalk = { path = "../chalk" }
 # rowan = { path = "../rowan" }
 
@@ -49,6 +50,7 @@ flycheck = { path = "./crates/flycheck", version = "0.0.0" }
 hir = { path = "./crates/hir", version = "0.0.0" }
 hir-def = { path = "./crates/hir-def", version = "0.0.0" }
 hir-expand = { path = "./crates/hir-expand", version = "0.0.0" }
+# Enable TypeScript + Serialize for HIR types
 hir-ty = { path = "./crates/hir-ty", version = "0.0.0", features = ["tserialize"] }
 ide = { path = "./crates/ide", version = "0.0.0" }
 ide-assists = { path = "./crates/ide-assists", version = "0.0.0" }
@@ -87,15 +89,15 @@ lsp-server = { version = "0.7.3" }
 
 argus = { path = "../crates/argus", version = "0.0.0" }
 
-# chalk-solve = { version = "0.92.0", default-features = false }
-# chalk-ir = "0.92.0"
-# chalk-recursive = { version = "0.92.0", default-features = false }
-# chalk-derive = "0.92.0"
-
-chalk-solve = { path = "../chalk/chalk-solve", features = ["tserialize"] }
+chalk-derive = { path = "../chalk/chalk-derive" }
 chalk-ir = { path = "../chalk/chalk-ir", features = ["tserialize"] }
+chalk-solve = { path = "../chalk/chalk-solve", features = ["tserialize"] }
 chalk-recursive = { path = "../chalk/chalk-recursive" }
-chalk-derive = { path = "../chalk/chalk-derive" } 
+
+# chalk-derive = "0.92.0"
+# chalk-ir = "0.92.0"
+# chalk-solve = { version = "0.92.0", default-features = false }
+# chalk-recursive = { version = "0.92.0", default-features = false }
 
 # non-local crates
 smallvec = { version = "1.10.0", features = [

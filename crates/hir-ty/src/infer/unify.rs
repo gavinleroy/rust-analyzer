@@ -16,12 +16,16 @@ use tracing::debug;
 
 use super::{InferOk, InferResult, InferenceContext, TypeError};
 use crate::{
-    proof_tree::utils::{ObligationKey, ObligationTracker, QueryAttempt, AttemptKind},
-    consteval::unknown_const, db::HirDatabase, fold_tys_and_consts, static_lifetime,
-    to_chalk_trait_id, traits::FnTrait, AliasEq, AliasTy, BoundVar, Canonical, Const, ConstValue,
-    DebruijnIndex, GenericArg, GenericArgData, Goal, Guidance, InEnvironment, InferenceVar,
-    Interner, Lifetime, ParamKind, ProjectionTy, ProjectionTyExt, Scalar, Solution, Substitution,
-    TraitEnvironment, Ty, TyBuilder, TyExt, TyKind, VariableKind,
+    consteval::unknown_const,
+    db::HirDatabase,
+    fold_tys_and_consts,
+    proof_tree::utils::{AttemptKind, InContext, ObligationKey, ObligationTracker, QueryAttempt},
+    static_lifetime, to_chalk_trait_id,
+    traits::FnTrait,
+    AliasEq, AliasTy, Binders, BoundVar, Canonical, Const, ConstValue, DebruijnIndex, GenericArg,
+    GenericArgData, Goal, Guidance, InEnvironment, InferenceVar, Interner, Lifetime, ParamKind,
+    ProjectionTy, ProjectionTyExt, Scalar, Solution, Substitution, TraitEnvironment, Ty, TyBuilder,
+    TyExt, TyKind, VariableKind,
 };
 
 impl InferenceContext<'_> {
@@ -45,7 +49,7 @@ where
     free_vars: Vec<GenericArg>,
 }
 
-impl<T: HasInterner<Interner = Interner>> Canonicalized<T> {
+impl<T: HasInterner<Interner = Interner> + std::fmt::Debug> Canonicalized<T> {
     pub(super) fn apply_solution(
         &self,
         ctx: &mut InferenceTable<'_>,
@@ -137,15 +141,15 @@ bitflags::bitflags! {
     }
 }
 
-type ChalkInferenceTable = chalk_solve::infer::InferenceTable<Interner>;
+pub type ChalkInferenceTable = chalk_solve::infer::InferenceTable<Interner>;
 
 impl InferenceTable<'_> {
-    fn fresh_key(&mut self) -> ObligationKey {
+    fn fresh_key(&mut self, original_goal: InEnvironment<Goal>) -> ObligationKey {
         let key = self.tracked_obligations.tracked.push(vec![]);
         let krate = self.trait_env.krate;
         let block = self.trait_env.block;
         self.tracked_obligations.info.insert(key, (krate, block));
-
+        self.tracked_obligations.goals.insert(key, original_goal);
         key
     }
 }
@@ -538,14 +542,11 @@ impl<'a> InferenceTable<'a> {
         goal: InEnvironment<Goal>,
         key: Option<ObligationKey>,
     ) {
-        let canonicalized = self.canonicalize(goal);
-        let key = key.unwrap_or_else(|| self.fresh_key());
-        let mut resolved = true;
+        let canonicalized = self.canonicalize(goal.clone());
+        let key = key.unwrap_or_else(|| self.fresh_key(goal));
         if !self.try_resolve_obligation(&canonicalized, key) {
-            resolved = false;
             self.pending_obligations.push((key, canonicalized.clone()));
         }
-        eprintln!("RESOLVING {} {:?}", resolved, canonicalized);
     }
 
     pub(crate) fn register_infer_ok<T>(&mut self, infer_ok: InferOk<T>) {
@@ -569,8 +570,7 @@ impl<'a> InferenceTable<'a> {
                     canonicalized.value.value,
                     Interner,
                 );
-                // self.register_obligation_in_env(uncanonical, Some(key));
-                self.register_obligation_in_env(uncanonical, None);
+                self.register_obligation_in_env(uncanonical, Some(key));
             }
         }
         self.resolve_obligations_buffer = obligations;
@@ -679,7 +679,7 @@ impl<'a> InferenceTable<'a> {
             Some(key),
         );
 
-        eprintln!("TRY:\n  {:?}\n  {:?}", canonicalized.value, solution);
+        // eprintln!("TRY:\n  {:?}\n  {:?}", canonicalized.value, solution);
 
         match solution {
             Some(Solution::Unique(canonical_subst)) => {
@@ -881,29 +881,80 @@ impl<'a> InferenceTable<'a> {
 
         let (solution, trace) = self.db.trait_solve_query(krate, block, canonicalized.clone());
 
-        let traced =
-            QueryAttempt { context, canonicalized, solution: solution.clone(), trace };
+        let traced = QueryAttempt {
+            // context,
+            canonicalized: canonicalized.clone(),
+            solution: solution.clone(),
+            trace,
+        };
 
         // NOTE: this is where we actually store the proof tree. This uses a lot of memory
         // and makes the test grind to a halt. The quick HACK is to just not store the trees
         // when testing, though there should be a better way.
         if let Some(key) = key {
             // If a key is given then this is part of an attempt to resolve a necessary goal.
-            self.tracked_obligations.tracked[key].push(traced);
+            let context = self.clone();
+            self.tracked_obligations.tracked[key].push(InContext { context, value: traced });
         } else {
             // If an obligation key is not provided, then RA is trying to gain more
             // information about a type, though it is not necessarily a requirement
-            // for the program to type-chekc.
+            // for the program to type-check.
             let krate = self.trait_env.krate;
             let block = self.trait_env.block;
-            self.tracked_obligations.other.push(super::TracedTraitQuery {
-                krate,
-                block,
-                kind: AttemptKind::Try(traced),
+            self.tracked_obligations.other.push(InContext {
+                context: self.clone(),
+                value: super::TracedTraitQuery {
+                    krate,
+                    block,
+                    ra_goal: canonicalized.value,
+                    kind: AttemptKind::Try(traced),
+                },
             });
         }
 
         solution
+    }
+}
+
+impl argus::utils::InferenceTableExt for InferenceTable<'_> {
+    type Interner = Interner;
+
+    fn canonicalize_fresh<T>(&self, interner: Self::Interner, value: T) -> Canonical<T>
+    where
+        T: TypeFoldable<Self::Interner>,
+        T: HasInterner<Interner = Self::Interner>,
+        T: Clone,
+    {
+        let mut table = ChalkInferenceTable::new();
+        table.canonicalize(Interner, value).quantified
+    }
+
+    fn instantiate_in<T>(
+        &mut self,
+        interner: Self::Interner,
+        binders: impl Iterator<Item = VariableKind>,
+        arg: T,
+    ) -> T
+    where
+        T: TypeFoldable<Self::Interner>,
+    {
+        // FIXME: RA only uses root universe, this can change later.
+        let universe = UniverseIndex::root();
+        let binders: Vec<_> = binders.map(|pk| CanonicalVarKind::new(pk, universe)).collect();
+        let subst = self.fresh_subst(&binders);
+        subst.apply(arg, interner)
+    }
+
+    fn instantiate_binders_existentially<T>(
+        &mut self,
+        interner: Self::Interner,
+        arg: Binders<T>,
+    ) -> T
+    where
+        T: TypeFoldable<Self::Interner> + HasInterner<Interner = Self::Interner>,
+    {
+        let (value, binders) = arg.into_value_and_skipped_binders();
+        self.instantiate_in(interner, binders.iter(interner).cloned(), value)
     }
 }
 

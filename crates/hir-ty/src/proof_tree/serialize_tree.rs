@@ -56,8 +56,8 @@ pub(crate) struct TreeContext<'a> {
     proof: &'a dyn Navigation<Interner>,
 }
 
-impl From<TracedTraitQuery<'_>> for SerializeTree {
-    fn from(query: TracedTraitQuery<'_>) -> Self {
+impl From<TracedTraitQuery> for SerializeTree {
+    fn from(query: TracedTraitQuery) -> Self {
         use super::NavigationExt;
         use crate::traits::ChalkContext;
 
@@ -65,7 +65,12 @@ impl From<TracedTraitQuery<'_>> for SerializeTree {
         let relationship = FxHashMap::default();
 
         match kind {
-            AttemptKind::Try(QueryAttempt { context, canonicalized, solution, trace }) => {
+            AttemptKind::Try(QueryAttempt {
+                // context,
+                canonicalized,
+                solution,
+                trace,
+            }) => {
                 let ir = &ChalkContext { db: context.db, krate, block };
 
                 let trace = trace.without_fromenv(Interner);
@@ -143,11 +148,11 @@ impl TreeContext<'_> {
         let inference_path =
             path_tr.iter().filter_map(|&idx| self.proof.get_node(idx).inference_info());
 
-        eprintln!("\n\n\n\n[RESOLVING] {:#?}\n", value);
+        // eprintln!("\n\n\n\n[RESOLVING] {:#?}\n", value);
         let value = inference_path.fold(value, |v, (tbl, subst)| {
             let table = &mut tbl.clone();
 
-            eprint!("    · applying ");
+            // eprint!("    · applying ");
             // eprint!(" [{subst:#?}]");
             // eprint!(" to: {v:#?}  -> ");
             let n = subst
@@ -155,7 +160,7 @@ impl TreeContext<'_> {
                 .try_fold_with(&mut convert::Resolver { table }, DebruijnIndex::INNERMOST)
                 .expect("Resolving inference vars is Infallible.");
 
-            eprintln!("{n:#?}\n");
+            // eprintln!("{n:#?}\n");
 
             n
         });

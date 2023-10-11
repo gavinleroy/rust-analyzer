@@ -50,11 +50,11 @@ use stdx::{always, never};
 use triomphe::Arc;
 
 use crate::{
-    proof_tree::utils::{TracedTraitQuery, AttemptKind},
     db::HirDatabase,
     fold_tys,
     infer::coerce::CoerceMany,
     lower::ImplTraitLoweringMode,
+    proof_tree::utils::{AttemptKind, TracedTraitQuery},
     static_lifetime, to_assoc_type_id,
     traits::FnTrait,
     utils::{InTypeConstIdMetadata, UnevaluatedConstEvaluatorFolder},
@@ -422,7 +422,8 @@ pub struct InferenceResult {
     pub mutated_bindings_in_closure: FxHashSet<BindingId>,
 
     /// The serializable traces that occurred within this body.
-    pub proof_trees: Vec<crate::proof_tree::SerializeTree>,
+    /// TODO fixup.
+    pub proof_trees: Vec<crate::proof_tree::utils::TracedTraitQuery>,
 }
 
 impl InferenceResult {
@@ -705,31 +706,33 @@ impl<'a> InferenceContext<'a> {
         }
 
         // Register all single attempts, there are not required obligations.
-        proof_trees.extend(
-            table
-                .tracked_obligations
-                .other
-                .into_iter()
-                .map(|attempt| attempt.into()),
+
+        eprintln!(
+            "Tracked: {} Other: {}",
+            table.tracked_obligations.tracked.len(),
+            table.tracked_obligations.other.len()
         );
 
-        // Register all required obligations, this shows how they evolved over time.
-        proof_trees.extend(
-            table
-                .tracked_obligations
-                .tracked
-                .into_iter_enumerated()
-                .map(|(key, attempts)| {
-                    let (krate, block) = table.tracked_obligations.info[&key];
+        // FIXME
+        let tracked = table.tracked_obligations.clone();
+        for traced_query in tracked.into_required_queries().iter() {
+            use crate::proof_tree::resolve::resolve_bindings;
 
-                    TracedTraitQuery {
-                        krate,
-                        block,
-                        kind: AttemptKind::Required(attempts),
-                    }
-                    .into()
-                }),
-        );
+            resolve_bindings(&mut table, traced_query);
+        }
+
+        // proof_trees.extend(
+        //     table.tracked_obligations.other.into_iter().map(|attempt| attempt.value.into()),
+        // );
+
+        // FIXME: Register all required obligations, this shows how they evolved over time.
+        // proof_trees.extend(table.tracked_obligations.tracked.into_iter_enumerated().map(
+        //     |(key, attempts)| {
+        //         let (krate, block) = table.tracked_obligations.info[&key];
+
+        //         TracedTraitQuery { krate, block, kind: AttemptKind::Required(attempts) }.into()
+        //     },
+        // ));
 
         result
     }
@@ -746,7 +749,7 @@ impl<'a> InferenceContext<'a> {
         let data = self.db.function_data(func);
         let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, func.into())
             .with_impl_trait_mode(ImplTraitLoweringMode::Param);
-        let mut param_tys = 
+        let mut param_tys =
             data.params.iter().map(|type_ref| ctx.lower_ty(type_ref)).collect::<Vec<_>>();
         // Check if function contains a va_list, if it does then we append it to the parameter types
         // that are collected from the function data
@@ -820,9 +823,9 @@ impl<'a> InferenceContext<'a> {
                 let var = self.table.new_type_var();
                 let var_subst = Substitution::from1(Interner, var.clone());
                 for bound in bounds {
-                    let predicate = 
+                    let predicate =
                         bound.map(|it| it.cloned()).substitute(Interner, &fn_placeholders);
-                    let (var_predicate, binders) = 
+                    let (var_predicate, binders) =
                         predicate.substitute(Interner, &var_subst).into_value_and_skipped_binders();
                     always!(binders.is_empty(Interner)); // quantified where clauses not yet handled
                     let var_predicate = self.insert_inference_vars_for_rpit(
@@ -841,6 +844,7 @@ impl<'a> InferenceContext<'a> {
 
     #[tracing::instrument(level = "debug", skip(self))]
     fn infer_body(&mut self) {
+        eprintln!("INFER BODY {:?}", self.return_coercion);
         match self.return_coercion {
             Some(_) => self.infer_return(self.body.body_expr),
             None => {
@@ -885,10 +889,15 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn make_ty(&mut self, type_ref: &TypeRef) -> Ty {
+        eprintln!("Lowering type ref {type_ref:?}");
         let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, self.owner.into());
         let ty = ctx.lower_ty(type_ref);
+        eprintln!("Lowered {ty:?}");
         let ty = self.insert_type_vars(ty);
-        self.normalize_associated_types_in(ty)
+        eprintln!("With type vars: {ty:?}");
+        let ty = self.normalize_associated_types_in(ty);
+        eprintln!("Normalized assoc tys: {ty:?}");
+        ty
     }
 
     fn err_ty(&self) -> Ty {

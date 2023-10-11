@@ -1,7 +1,8 @@
-pub mod serialize_tree;
+// pub mod serialize_tree;
 mod types;
 mod writer;
 pub(crate) mod utils;
+pub(crate) mod resolve;
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -10,6 +11,13 @@ use index_vec::IndexVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use argus::{proof_tree::ChildRelKind, utils::SexpExt};
+
+/*
+ * The serializable proof tree needs to incorporate:
+ * - [ ] Chalk proofs / other constructs
+ * - [ ] Rust types
+ * - [ ] Rust constructs (impls mostly).
+ */
 
 // Core data structures used in the (serializable) proof tree
 //
@@ -119,7 +127,7 @@ use crate::Interner;
 
 use argus::{
     proof_tree::{
-        flat::ProofNodeIdx,
+        indices::ProofNodeIdx,
         navigation::{BuildControlFlow, Navigation, TreeView, ViewBuilder},
     },
     topology::TreeTopology,

@@ -596,6 +596,7 @@ name = "hir-def"
 version = "0.0.0"
 dependencies = [
  "anymap",
+ "argus",
  "arrayvec",
  "base-db",
  "bitflags 2.3.2",
@@ -2291,7 +2292,6 @@ dependencies = [
 [[package]]
 name = "ts-rs"
 version = "6.2.0"
-source = "git+https://github.com/gavinleroy/ts-rs.git#89422e23c7e50ca603aecccd929ebc098d16542c"
 dependencies = [
  "index_vec",
  "rustc-hash",
@@ -2304,7 +2304,6 @@ dependencies = [
 [[package]]
 name = "ts-rs-macros"
 version = "6.2.0"
-source = "git+https://github.com/gavinleroy/ts-rs.git#89422e23c7e50ca603aecccd929ebc098d16542c"
 dependencies = [
  "Inflector",
  "proc-macro2",

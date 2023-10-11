@@ -9,17 +9,14 @@ use std::{
 
 use base_db::salsa::InternId;
 use chalk_ir::TSerialize;
-use intern::{Internable, Interned};
 use index_vec::IndexVec;
+use intern::{Internable, Interned};
 use rustc_hash::FxHashMap;
 
 use serde::{Serialize, Serializer};
 use ts_rs::TS;
 
-use crate::{
-    Canonical, InEnvironment, Goal, Solution, ProofTree,
-    infer::unify,
-};
+use crate::{infer::unify, Canonical, Goal, InEnvironment, ProofTree, Solution};
 
 // ----------------
 // Inference junk
@@ -28,42 +25,79 @@ index_vec::define_index_type! {
     pub struct ObligationKey = usize;
 }
 
-
 #[derive(Clone, Debug)]
-pub struct QueryAttempt<'a> {
+pub struct InContext<'a, T> {
     pub(crate) context: unify::InferenceTable<'a>,
+    pub value: T,
+}
+
+#[derive(TS, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct QueryAttempt {
     pub canonicalized: Canonical<InEnvironment<Goal>>,
     pub solution: Option<Solution>,
     pub trace: ProofTree,
 }
 
-#[derive(Clone, Debug)]
-pub enum AttemptKind<'a> {
-    Required(Vec<QueryAttempt<'a>>),
-    Try(QueryAttempt<'a>),
+#[derive(TS, Serialize, Clone, Debug, PartialEq, Eq)]
+pub enum AttemptKind {
+    Required(Vec<QueryAttempt>),
+    Try(QueryAttempt),
 }
 
-#[derive(Clone, Debug)]
-pub struct TracedTraitQuery<'a> {
+#[derive(TS, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct TracedTraitQuery {
+    #[ts(skip)]
+    #[serde(skip_serializing)]
     pub krate: base_db::CrateId,
-    pub block: Option<hir_def::BlockId>,
-    pub kind: AttemptKind<'a>,
-}
 
+    #[ts(skip)]
+    #[serde(skip_serializing)]
+    pub block: Option<hir_def::BlockId>,
+
+    pub ra_goal: InEnvironment<Goal>,
+
+    pub kind: AttemptKind,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ObligationTracker<'a> {
     /// The obligation attempts during the process of type-checking. For a given
     /// tracked obligation, there may be several attempts at making it succeed.
     /// These are *required* to succeed for type-checking to succeed.
-    pub tracked: IndexVec<ObligationKey, Vec<QueryAttempt<'a>>>,
+    pub tracked: IndexVec<ObligationKey, Vec<InContext<'a, QueryAttempt>>>,
 
     pub info: FxHashMap<ObligationKey, (base_db::CrateId, Option<hir_def::BlockId>)>,
+
+    /// The RA aware goal.
+    pub goals: FxHashMap<ObligationKey, InEnvironment<Goal>>,
 
     /// During type-inference sometimes RA wants to know if something holds,
     /// but that isn't necessarily required for type-checking to succeed. The
     /// responses here *can* dictate what is tried in the future.
-    pub other: Vec<TracedTraitQuery<'a>>,
+    pub other: Vec<InContext<'a, TracedTraitQuery>>,
+}
+
+impl ObligationTracker<'_> {
+    pub fn into_required_queries(self) -> Vec<TracedTraitQuery> {
+        let ObligationTracker { tracked, info, goals, .. } = self;
+        tracked
+            .into_iter_enumerated()
+            .map(|(okey, ctx_attempts)| {
+                let attempts = ctx_attempts
+                    .into_iter()
+                    .map(|ctx_attempt| ctx_attempt.value)
+                    .collect::<Vec<_>>();
+                let (krate, block) = info.get(&okey).unwrap();
+                let ra_goal = goals.get(&okey).unwrap();
+                TracedTraitQuery {
+                    krate: *krate,
+                    block: *block,
+                    ra_goal: ra_goal.clone(),
+                    kind: AttemptKind::Required(attempts),
+                }
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 // ----------------
