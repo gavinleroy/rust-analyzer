@@ -8,26 +8,13 @@ use hir_def::GenericDefId;
 use rustc_hash::FxHashMap;
 
 use chalk_ir::{debug::*, interner::HasInterner, TSerialize, *};
-use chalk_solve::RustIrDatabase;
+use chalk_solve::{RustIrDatabase, Solution};
 
 use crate::{
     interner::Interner,
     mapping::{from_assoc_type_id, from_chalk_trait_id, ToChalk},
     CallableDefId, HirDatabase,
 };
-
-/* === CURRENT TODO(gavinleroy) ===
- *
- * - [ ] resolve all inference vars within nodes.
- * - [ ] many of the items are filled with a `todo!`
- * - [ ] track generic params from where they were generated.
- *       E.g., `IntoSystemConfig<M>` instead of `IntoSystemConfig<Marker>`.
- * - [X] track reentrant obligations (fixpoints at the inference level) so
- *       we can filter them.
- * - [ ] remove the "advanced goals" from the output. For now. Later we
- *       can introduce a mechanism to toggle them.
- *
- */
 
 macro_rules! deep {
     ($fmt:expr, $ctxt:expr, $($expr:expr),*) => {{
@@ -1217,5 +1204,28 @@ impl DeepDebug for Variances<Interner> {
         ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
         self.as_slice(Interner).using_square().fmt_deep(fmt, ctxt)
+    }
+}
+
+impl DeepDebug for Solution<Interner> {
+    fn fmt_deep(
+        &self,
+        fmt: &mut Formatter<'_>,
+        ctxt: &mut DebugContext<'_, '_>,
+    ) -> Result<(), Error> {
+        todo!()
+    }
+}
+
+impl DeepDebug for Fallible<Solution<Interner>> {
+    fn fmt_deep(
+        &self,
+        fmt: &mut Formatter<'_>,
+        ctxt: &mut DebugContext<'_, '_>,
+    ) -> Result<(), Error> {
+        match self {
+            Err(e) => write!(fmt, "No"),
+            Ok(sol) => write!(fmt, "{:?}", sol),
+        }
     }
 }

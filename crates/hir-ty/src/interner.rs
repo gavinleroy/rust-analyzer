@@ -140,7 +140,13 @@ impl chalk_ir::interner::Interner for Interner {
         proj: &chalk_ir::ProjectionTy<Interner>,
         fmt: &mut fmt::Formatter<'_>,
     ) -> Option<fmt::Result> {
-        tls::with_current_program(|prog| Some(prog?.debug_projection_ty(proj, fmt)))
+        tls::with_current_program(|prog| {
+            if prog.is_none() {
+                panic!("TLS NOT SET");
+            }
+
+            Some(prog?.debug_projection_ty(proj, fmt))
+        })
     }
 
     fn debug_opaque_ty(

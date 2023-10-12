@@ -3,113 +3,140 @@
 use std::borrow::BorrowMut;
 
 use argus::{
-    proof_tree::{fulfill::FulfillmentKind, navigation::NavRooted, ProofTree},
+    proof_tree::{flat::ProofTreeNav, fulfill::FulfillmentKind, navigation::NavRooted, ProofTree},
     utils::InferenceTableExt,
 };
-use chalk_ir::{zip::Zip, UniverseIndex};
+
+use chalk_ir::cast::Cast;
+use chalk_ir::fold::TypeFoldable;
+use chalk_ir::Fallible;
+use chalk_ir::{interner::HasInterner, zip::Zip, UniverseIndex};
+use either::Either;
+use index_vec::IndexVec;
+use itertools::Itertools;
 
 use super::{utils::*, *};
 use crate::{
     infer::unify::{ChalkInferenceTable, InferenceTable},
-    CanonicalVarKind, ProgramClauseImplication, Substitution,
+    CanonicalVarKind, DebruijnIndex, GenericArg, InferenceVar, ProgramClauseImplication, Solution,
+    Substitution, VariableKind,
 };
+use crate::{Goal, InEnvironment};
 
-fn expect_unify<T: ?Sized + Zip<Interner>>(table: &mut InferenceTable<'_>, t1: &T, t2: &T) {
-    table.try_unify(t1, t2).unwrap_or_else(|e| {
-        panic!("Couldn't unify:\n\t{t1:?}\n\t{t2:?}\n\n{e:?}");
-    });
+pub struct ResolvedTrace<'a> {
+    pub info: ObligationSource,
+    pub(crate) tables: FxHashMap<ProofNodeIdx, InferenceTable<'a>>,
+    pub resolved_goals: FxHashMap<ProofNodeIdx, Either<Goal, Fallible<Solution>>>,
+    pub query: QueryAttempt,
 }
 
-pub(crate) fn resolve_bindings(table: &mut InferenceTable<'_>, query: &TracedTraitQuery) {
+fn expect_unify<T: ?Sized + Zip<Interner>>(table: &mut InferenceTable<'_>, t1: &T, t2: &T) {
+    if table.try_unify(t1, t2).is_err() {
+        tracing::warn!(
+            r#"
+Couldn't unify:
+    {t1:?}
+    {t2:?}
+"#
+        );
+    }
+}
+
+pub(crate) fn resolve_bindings<'a>(
+    table: &mut InferenceTable<'a>,
+    query: &TracedTraitQuery,
+) -> ResolvedTrace<'a> {
     let AttemptKind::Required(qas) = &query.kind else {
         todo!();
     };
 
-    // Find query attempt with the deepest failure (HACK: actually analyze these).
-    let Some((qa, path)) = qas.into_iter().fold(None, |acc, qa| {
-        let Some(new_path) = qa.trace.find_lowest_failure() else {
-            return acc;
-        };
+    let biggest = qas.into_iter().max_set_by(|a, b| {
+        let len_a = a.trace.nodes.len();
+        let len_b = b.trace.nodes.len();
+        len_a.cmp(&len_b)
+    });
 
-        let Some((_, old_path)) = &acc else {
-            return Some((qa, new_path));
-        };
+    let qa = biggest.first().unwrap();
 
-        if old_path.len() < new_path.len() {
-            Some((qa, new_path))
-        } else {
-            acc
-        }
-    }) else {
-        panic!();
+    struct Env<'b, 'c> {
+        prev: InEnvironment<Goal>,
+        prev_clause_subst: Option<Substitution>,
+        table: InferenceTable<'b>,
+        tables: FxHashMap<ProofNodeIdx, InferenceTable<'b>>,
+        nodes: FxHashMap<ProofNodeIdx, Either<Goal, Fallible<Solution>>>,
+        trace: &'c ProofTreeNav<Interner>,
+    }
+
+    let mut env = Env {
+        prev: query.info.goal.clone().cast(Interner),
+        prev_clause_subst: None,
+        table: table.clone(),
+        tables: FxHashMap::default(),
+        nodes: FxHashMap::default(),
+        trace: &qa.trace,
     };
 
-    eprintln!("\n------------ TRACING -------------");
-    eprintln!("RA GOAL: {:?}\n", table.resolve_completely(query.ra_goal.clone()));
-    eprintln!("         {:?}\n", query.ra_goal.clone());
-    eprintln!("▶");
+    fn resolve_node(env: &mut Env<'_, '_>, node: ProofNodeIdx) {
+        let resolved;
 
-    let trace = &qa.trace;
-
-    use crate::{Goal, InEnvironment};
-    use chalk_ir::cast::Cast;
-
-    let mut prev: InEnvironment<Goal> = query.ra_goal.clone().cast(Interner);
-    let mut prev_clause_subst: Option<Substitution> = None;
-    let mut last_infer: Option<ChalkInferenceTable> = None;
-
-    for node in path.path.iter() {
-        eprintln!("> {prev:?}");
-        eprintln!("> {prev_clause_subst:?}\n");
-
-        match &trace.nodes[*node] {
+        match &env.trace.nodes[node] {
+            // Assumption, the previous goal is the same shape as this one.
+            //
+            // `FromClauses` is the node that attempts a different clause when proving
+            // the rule. This means that the previous goal, is the same as this one, we are
+            // just gathering the possible program clauses that will prove by implication.
+            //
+            // Steps:
+            // Instantiate the canonicalized goal in this context.
+            // Unify new inference variables with those already in the context
+            //   (i.e., those from the previous goal).
             ProofTree::FromClauses(value) => {
-                eprintln!("[FromClauses] {:?}", value.goal().clone());
-                eprintln!("              {:?}", {
-                    let canonical = value.goal().canonical.clone();
-                    let goal = table.instantiate_canonical(canonical).cast(Interner);
-
-                    eprintln!(
-                        "              Unifying\n                {prev:?}\n                {goal:?}"
-                    );
-                    // expect_unify(&mut table, &prev, &goal);
-                    prev = goal;
-                    &prev
-                });
+                let canonical = value.goal().canonical.clone();
+                let goal = env.table.instantiate_canonical(canonical).cast(Interner);
+                expect_unify(&mut env.table, &env.prev, &goal);
+                resolved = Either::Left(goal.goal.clone());
+                env.prev = goal;
             }
 
+            // Assumption, the previous goal is the same shape as this one.
+            //
+            // TODO
             ProofTree::Fulfill(value) => match value.goal() {
                 FulfillmentKind::WithClause { goal, clause } => {
-                    let mut tbl = value.infer.0.clone();
-
-                    let pci = table.instantiate_binders_existentially(Interner, clause.clone());
+                    let pci = env.table.instantiate_binders_existentially(Interner, clause.clone());
                     let (pc, binders) = clause.clone().into_value_and_skipped_binders();
-                    let clause_subst = table.fresh_subst(
-                        &binders
-                            .iter(Interner)
-                            .cloned()
-                            .map(|pk| CanonicalVarKind::new(pk, UniverseIndex::root()))
-                            .collect::<Vec<_>>(),
+                    let value = goal.canonical.value.clone();
+
+                    let clause_args = binders
+                        .iter(Interner)
+                        .cloned()
+                        .map(|pk| CanonicalVarKind::new(pk, UniverseIndex::root()))
+                        .collect::<Vec<_>>();
+                    let canonical_args =
+                        goal.canonical.binders.iter(Interner).cloned().collect::<Vec<_>>();
+
+                    let the_args = if clause_args.len() < canonical_args.len() {
+                        canonical_args
+                    } else {
+                        clause_args
+                    };
+
+                    let clause_subst = env.table.fresh_subst(&the_args);
+                    let goal = clause_subst.apply(value.clone(), Interner).cast(Interner);
+
+                    // Unify the goal with the previous
+                    expect_unify(&mut env.table, &env.prev, &goal);
+
+                    // Unify the prev with the consequence of the goal pci @ (consequence :- [conditions ⩘ ...])
+                    expect_unify(
+                        &mut env.table,
+                        &env.prev.goal,
+                        &pci.consequence.clone().cast(Interner),
                     );
 
-                    let canonicalized = tbl.canonicalize(Interner, goal.clone());
-
-                    eprintln!("[UsingClause] {:?}", goal.clone());
-                    eprintln!("              {:?}", clause);
-                    eprintln!("              {:?}", pci);
-                    eprintln!("              {:?}", {
-                        let instantiated =
-                            clause_subst.apply(canonicalized.quantified.value, Interner);
-
-                        expect_unify(table, &prev, &instantiated.clone().cast(Interner));
-                        expect_unify(table, &prev.goal, &pci.consequence.clone().cast(Interner));
-
-                        prev = instantiated.cast(Interner);
-                        prev_clause_subst = Some(clause_subst);
-                        &prev
-                    });
-
-                    last_infer = Some(tbl);
+                    resolved = Either::Left(goal.goal.clone());
+                    env.prev = goal.clone();
+                    env.prev_clause_subst = Some(clause_subst);
                 }
 
                 FulfillmentKind::WithSimplification { goal, .. } => {
@@ -120,30 +147,56 @@ pub(crate) fn resolve_bindings(table: &mut InferenceTable<'_>, query: &TracedTra
                 }
             },
 
+            // Assumptions:
+            // - The parent node is a `Fulfill` node.
+            // - The goal here is on of the conditions of the program clause.
+            // - The clause substitution was stored.
+            //
+            // TODO
             ProofTree::Obligation(value) => {
-                eprintln!(
-                    "[Obligation {:?}] {:?}",
-                    value.obligation.kind,
-                    value.obligation.goal.clone()
-                );
-                eprintln!("                   {:?}", {
-                    let mut infer = last_infer.clone().unwrap();
-                    let canonicalized = infer.canonicalize(Interner, value.obligation.goal.clone());
-                    let clause_subst = prev_clause_subst.clone().unwrap();
-                    let instantiated =
-                        clause_subst.apply(canonicalized.quantified.value, Interner).cast(Interner);
-                    prev = instantiated;
-                    &prev
-                });
+                let clause_subst = env.prev_clause_subst.clone().unwrap();
+                let goal = clause_subst
+                    .apply(value.goal().canonical.value.clone(), Interner)
+                    .cast(Interner);
+                resolved = Either::Left(goal.goal.clone());
+                env.prev = goal;
             }
 
             ProofTree::Leaf(leaf) => {
-                eprintln!("🏁 {:?}", leaf);
+                let leaf = leaf.outcome.clone();
+                // TODO we need to instantiate the solution, but Argus
+                // isn't currently capturing Canonical solutions, just solutions...
+                // UGH
+                // let leaf = env.table.instantiate_canonical(leaf);
+                resolved = Either::Right(leaf);
             }
         }
 
-        print!("\n");
+        env.nodes.insert(node, resolved);
+        env.tables.insert(node, env.table.clone());
+
+        let this_table = env.table.clone();
+        let this_prev = env.prev.clone();
+        let this_subst = env.prev_clause_subst.clone();
+
+        for child in env.trace.topology.children(node) {
+            env.table = this_table.clone();
+            env.prev = this_prev.clone();
+            env.prev_clause_subst = this_subst.clone();
+
+            resolve_node(env, child);
+        }
     }
 
-    eprintln!("-----------------------------------");
+    let root = env.trace.descr.root;
+    resolve_node(&mut env, root);
+
+    // TODO assert that we actually resolved all nodes.
+
+    ResolvedTrace {
+        info: query.info.clone(),
+        tables: env.tables,
+        resolved_goals: env.nodes,
+        query: qa.clone().clone(),
+    }
 }

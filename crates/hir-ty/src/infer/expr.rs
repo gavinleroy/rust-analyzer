@@ -300,12 +300,6 @@ impl InferenceContext<'_> {
                 ty
             }
             Expr::Call { callee, args, .. } => {
-                eprintln!(
-                    "INFER CALL {:?} ( {:?} )",
-                    *callee,
-                    args.iter().map(|idx| *idx).collect::<Vec<_>>()
-                );
-
                 let callee_ty = self.infer_expr(*callee, &Expectation::none());
                 let mut derefs = Autoderef::new(&mut self.table, callee_ty.clone(), false);
                 let (res, derefed_callee) = 'b: {
@@ -1739,21 +1733,17 @@ impl InferenceContext<'_> {
     }
 
     fn register_obligations_for_call(&mut self, callable_ty: &Ty) {
-        eprintln!("REGISTER OBLIGATIONS for call {callable_ty:?}");
         let callable_ty = self.resolve_ty_shallow(callable_ty);
         if let TyKind::FnDef(fn_def, parameters) = callable_ty.kind(Interner) {
-            eprintln!("fn_def: {fn_def:?} params: {parameters:?}");
             let def: CallableDefId = from_chalk(self.db, *fn_def);
             let generic_predicates = self.db.generic_predicates(def.into());
             for predicate in generic_predicates.iter() {
-                eprintln!("Predicate {predicate:?}");
                 let (predicate, binders) = predicate
                     .clone()
                     .substitute(Interner, parameters)
                     .into_value_and_skipped_binders();
                 always!(binders.len(Interner) == 0); // quantified where clauses not yet handled
-                eprintln!("Pushing {predicate:?}");
-                self.push_obligation(predicate.cast(Interner));
+                self.push_obligation(predicate.cast(Interner), Some(callable_ty.clone()));
             }
             // add obligation for trait implementation, if this is a trait method
             match def {
@@ -1771,6 +1761,7 @@ impl InferenceContext<'_> {
                         self.push_obligation(
                             TraitRef { trait_id: to_chalk_trait_id(trait_), substitution: substs }
                                 .cast(Interner),
+                            Some(callable_ty.clone()),
                         );
                     }
                 }

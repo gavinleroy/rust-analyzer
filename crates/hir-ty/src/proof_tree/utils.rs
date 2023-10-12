@@ -16,7 +16,7 @@ use rustc_hash::FxHashMap;
 use serde::{Serialize, Serializer};
 use ts_rs::TS;
 
-use crate::{infer::unify, Canonical, Goal, InEnvironment, ProofTree, Solution};
+use crate::{infer::unify, Canonical, Goal, InEnvironment, ProofTree, Solution, Ty};
 
 // ----------------
 // Inference junk
@@ -46,17 +46,21 @@ pub enum AttemptKind {
 
 #[derive(TS, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct TracedTraitQuery {
+    pub info: ObligationSource,
+
+    pub kind: AttemptKind,
+}
+
+#[derive(TS, Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct ObligationSource {
     #[ts(skip)]
     #[serde(skip_serializing)]
     pub krate: base_db::CrateId,
-
     #[ts(skip)]
     #[serde(skip_serializing)]
     pub block: Option<hir_def::BlockId>,
-
-    pub ra_goal: InEnvironment<Goal>,
-
-    pub kind: AttemptKind,
+    pub source: Option<Ty>,
+    pub goal: InEnvironment<Goal>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -66,10 +70,7 @@ pub struct ObligationTracker<'a> {
     /// These are *required* to succeed for type-checking to succeed.
     pub tracked: IndexVec<ObligationKey, Vec<InContext<'a, QueryAttempt>>>,
 
-    pub info: FxHashMap<ObligationKey, (base_db::CrateId, Option<hir_def::BlockId>)>,
-
-    /// The RA aware goal.
-    pub goals: FxHashMap<ObligationKey, InEnvironment<Goal>>,
+    pub info: FxHashMap<ObligationKey, ObligationSource>,
 
     /// During type-inference sometimes RA wants to know if something holds,
     /// but that isn't necessarily required for type-checking to succeed. The
@@ -79,7 +80,7 @@ pub struct ObligationTracker<'a> {
 
 impl ObligationTracker<'_> {
     pub fn into_required_queries(self) -> Vec<TracedTraitQuery> {
-        let ObligationTracker { tracked, info, goals, .. } = self;
+        let ObligationTracker { tracked, info, .. } = self;
         tracked
             .into_iter_enumerated()
             .map(|(okey, ctx_attempts)| {
@@ -87,14 +88,8 @@ impl ObligationTracker<'_> {
                     .into_iter()
                     .map(|ctx_attempt| ctx_attempt.value)
                     .collect::<Vec<_>>();
-                let (krate, block) = info.get(&okey).unwrap();
-                let ra_goal = goals.get(&okey).unwrap();
-                TracedTraitQuery {
-                    krate: *krate,
-                    block: *block,
-                    ra_goal: ra_goal.clone(),
-                    kind: AttemptKind::Required(attempts),
-                }
+                let info = info.get(&okey).unwrap();
+                TracedTraitQuery { info: info.clone(), kind: AttemptKind::Required(attempts) }
             })
             .collect::<Vec<_>>()
     }

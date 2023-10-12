@@ -151,7 +151,7 @@ impl InferenceContext<'_> {
                 predicate.clone().substitute(Interner, &subst).into_value_and_skipped_binders();
             // Quantified where clauses are not yet handled.
             stdx::always!(binders.is_empty(Interner));
-            self.push_obligation(predicate.cast(Interner));
+            self.push_obligation(predicate.cast(Interner), None);
         }
 
         // We need to add `Self: Trait` obligation when `def` is a trait assoc item.
@@ -167,7 +167,7 @@ impl InferenceContext<'_> {
                 Substitution::from_iter(Interner, subst.iter(Interner).skip(param_len));
             let trait_ref =
                 TraitRef { trait_id: to_chalk_trait_id(trait_), substitution: parent_subst };
-            self.push_obligation(trait_ref.cast(Interner));
+            self.push_obligation(trait_ref.cast(Interner), None);
         }
     }
 
@@ -338,7 +338,7 @@ impl InferenceContext<'_> {
                     .push(ty.clone())
                     .fill_with_inference_vars(&mut self.table)
                     .build();
-                self.push_obligation(trait_ref.clone().cast(Interner));
+                self.push_obligation(trait_ref.clone().cast(Interner), None);
                 trait_ref.substitution
             }
             ItemContainerId::ModuleId(_) | ItemContainerId::ExternBlockId(_) => {

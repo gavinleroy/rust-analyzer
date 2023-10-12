@@ -422,8 +422,7 @@ pub struct InferenceResult {
     pub mutated_bindings_in_closure: FxHashSet<BindingId>,
 
     /// The serializable traces that occurred within this body.
-    /// TODO fixup.
-    pub proof_trees: Vec<crate::proof_tree::utils::TracedTraitQuery>,
+    pub proof_trees: Vec<crate::SerializedTree>,
 }
 
 impl InferenceResult {
@@ -604,7 +603,7 @@ impl<'a> InferenceContext<'a> {
     // used this function for another workaround, mention it here. If you really need this function and believe that
     // there is no problem in it being `pub(crate)`, remove this comment.
     pub(crate) fn resolve_all(self) -> InferenceResult {
-        let InferenceContext { mut table, mut result, deferred_cast_checks, .. } = self;
+        let InferenceContext { mut table, mut result, deferred_cast_checks, db, .. } = self;
         // Destructure every single field so whenever new fields are added to `InferenceResult` we
         // don't forget to handle them here.
         let InferenceResult {
@@ -707,32 +706,19 @@ impl<'a> InferenceContext<'a> {
 
         // Register all single attempts, there are not required obligations.
 
-        eprintln!(
-            "Tracked: {} Other: {}",
-            table.tracked_obligations.tracked.len(),
-            table.tracked_obligations.other.len()
-        );
-
-        // FIXME
-        let tracked = table.tracked_obligations.clone();
-        for traced_query in tracked.into_required_queries().iter() {
+        // FIXME all the 'into' business here is wrong, they can
+        // all be references until writing the resolved strings.
+        let tracked = table.tracker.clone();
+        let required_queries = tracked.into_required_queries();
+        let resolved_queries = required_queries.into_iter().map(|traced_query| {
             use crate::proof_tree::resolve::resolve_bindings;
+            resolve_bindings(&mut table, &traced_query)
+        });
 
-            resolve_bindings(&mut table, traced_query);
-        }
-
-        // proof_trees.extend(
-        //     table.tracked_obligations.other.into_iter().map(|attempt| attempt.value.into()),
-        // );
-
-        // FIXME: Register all required obligations, this shows how they evolved over time.
-        // proof_trees.extend(table.tracked_obligations.tracked.into_iter_enumerated().map(
-        //     |(key, attempts)| {
-        //         let (krate, block) = table.tracked_obligations.info[&key];
-
-        //         TracedTraitQuery { krate, block, kind: AttemptKind::Required(attempts) }.into()
-        //     },
-        // ));
+        proof_trees.extend(resolved_queries.into_iter().map(|resolved| {
+            use crate::proof_tree::serialize_resolved_tree;
+            serialize_resolved_tree(db, resolved)
+        }));
 
         result
     }
@@ -833,7 +819,7 @@ impl<'a> InferenceContext<'a> {
                         rpits.clone(),
                         fn_placeholders.clone(),
                     );
-                    self.push_obligation(var_predicate.cast(Interner));
+                    self.push_obligation(var_predicate.cast(Interner), None);
                 }
                 self.result.type_of_rpit.insert(idx, var.clone());
                 var
@@ -844,7 +830,6 @@ impl<'a> InferenceContext<'a> {
 
     #[tracing::instrument(level = "debug", skip(self))]
     fn infer_body(&mut self) {
-        eprintln!("INFER BODY {:?}", self.return_coercion);
         match self.return_coercion {
             Some(_) => self.infer_return(self.body.body_expr),
             None => {
@@ -889,14 +874,10 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn make_ty(&mut self, type_ref: &TypeRef) -> Ty {
-        eprintln!("Lowering type ref {type_ref:?}");
         let ctx = crate::lower::TyLoweringContext::new(self.db, &self.resolver, self.owner.into());
         let ty = ctx.lower_ty(type_ref);
-        eprintln!("Lowered {ty:?}");
         let ty = self.insert_type_vars(ty);
-        eprintln!("With type vars: {ty:?}");
         let ty = self.normalize_associated_types_in(ty);
-        eprintln!("Normalized assoc tys: {ty:?}");
         ty
     }
 
@@ -916,8 +897,8 @@ impl<'a> InferenceContext<'a> {
         self.table.insert_type_vars(ty)
     }
 
-    fn push_obligation(&mut self, o: DomainGoal) {
-        self.table.register_obligation(o.cast(Interner));
+    fn push_obligation(&mut self, o: DomainGoal, from_ty: Option<Ty>) {
+        self.table.register_obligation(o.cast(Interner), from_ty);
     }
 
     fn unify(&mut self, ty1: &Ty, ty2: &Ty) -> bool {
@@ -1049,8 +1030,8 @@ impl<'a> InferenceContext<'a> {
                     }),
                     ty: ty.clone(),
                 };
-                self.push_obligation(trait_ref.cast(Interner));
-                self.push_obligation(alias_eq.cast(Interner));
+                self.push_obligation(trait_ref.cast(Interner), None);
+                self.push_obligation(alias_eq.cast(Interner), None);
                 ty
             }
             None => self.err_ty(),

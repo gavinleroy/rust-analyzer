@@ -170,7 +170,6 @@ fn solve(
 
     // don't set the TLS for Chalk unless Chalk debugging is active, to make
     // extra sure we only use it for debugging
-    // crate::tls::set_current_program(db, || chalk_solve::logging::with_tracing_logs(solve))
     if is_chalk_debug() {
         crate::tls::set_current_program(db, solve)
     } else {

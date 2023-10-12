@@ -71,8 +71,6 @@ impl From<TracedTraitQuery> for SerializeTree {
                 solution,
                 trace,
             }) => {
-                let ir = &ChalkContext { db: context.db, krate, block };
-
                 let trace = trace.without_fromenv(Interner);
                 let trace = trace.without_duplicate_clauses(Interner);
                 let trace = trace.without_obligations(Interner);

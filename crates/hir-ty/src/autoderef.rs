@@ -168,7 +168,7 @@ pub(crate) fn deref_by_trait(
     let implements_goal: Goal = trait_ref.cast(Interner);
     table.try_obligation(implements_goal.clone(), None)?;
 
-    table.register_obligation(implements_goal);
+    table.register_obligation(implements_goal, None);
 
     let result = table.normalize_projection_ty(projection);
     Some(table.resolve_ty_shallow(&result))

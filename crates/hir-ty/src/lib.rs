@@ -163,6 +163,7 @@ pub type Guidance = chalk_solve::Guidance<Interner>;
 pub type ProgramClauseImplication = chalk_ir::ProgramClauseImplication<Interner>;
 pub type WhereClause = chalk_ir::WhereClause<Interner>;
 pub type ProofTree = argus::proof_tree::flat::ProofTreeNav<Interner>;
+pub type SerializedTree = crate::proof_tree::SerializedTree;
 pub type TracedSolution = (Option<Solution>, ProofTree);
 
 /// A constant can have reference to other things. Memory map job is holding
@@ -662,7 +663,7 @@ pub fn callable_sig_from_fnonce(
         Some(trait_ref.substitution.clone()),
     )
     .build();
-    table.register_obligation(trait_ref.cast(Interner));
+    table.register_obligation(trait_ref.cast(Interner), None);
     let ret_ty = table.normalize_projection_ty(projection);
 
     let ret_ty = table.resolve_completely(ret_ty);
