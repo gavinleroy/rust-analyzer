@@ -56,7 +56,7 @@ pub(crate) fn resolve_bindings<'a>(
         len_a.cmp(&len_b)
     });
 
-    let qa = biggest.first().unwrap();
+    let qa = *biggest.first().unwrap();
 
     struct Env<'b, 'c> {
         prev: InEnvironment<Goal>,
@@ -78,6 +78,10 @@ pub(crate) fn resolve_bindings<'a>(
 
     fn resolve_node(env: &mut Env<'_, '_>, node: ProofNodeIdx) {
         let resolved;
+
+        if env.nodes.contains_key(&node) {
+            return;
+        }
 
         match &env.trace.nodes[node] {
             // Assumption, the previous goal is the same shape as this one.
@@ -172,8 +176,14 @@ pub(crate) fn resolve_bindings<'a>(
             }
         }
 
-        env.nodes.insert(node, resolved);
-        env.tables.insert(node, env.table.clone());
+        let _p = env.nodes.insert(node, resolved);
+        if _p.is_some() {
+            panic!("Inserting twice {node:?} {_p:?}");
+        }
+        let _p = env.tables.insert(node, env.table.clone());
+        if _p.is_some() {
+            panic!("Inserting twice {node:?} {_p:?}");
+        }
 
         let this_table = env.table.clone();
         let this_prev = env.prev.clone();
@@ -197,6 +207,6 @@ pub(crate) fn resolve_bindings<'a>(
         info: query.info.clone(),
         tables: env.tables,
         resolved_goals: env.nodes,
-        query: qa.clone().clone(),
+        query: qa.clone(),
     }
 }

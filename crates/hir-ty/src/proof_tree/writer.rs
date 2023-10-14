@@ -585,7 +585,7 @@ impl DeepDebug for ProjectionTy<Interner> {
             from_assoc_type_id(self.associated_ty_id),
             self.substitution.as_slice(Interner),
         );
-        deep!(fmt, ctxt, "(", self.associated_ty_id, ")", ga)
+        deep!(fmt, ctxt, ga, "::", self.associated_ty_id)
     }
 }
 

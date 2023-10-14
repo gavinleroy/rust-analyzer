@@ -40,7 +40,8 @@ use argus::{
 pub struct SerializedTree {
     pub descr: TreeDescription,
     pub nodes: IndexVec<ProofNodeIdx, String>,
-    pub topology: TreeTopology<ProofNodeIdx, ProofNodeIdx>,
+    pub error_leaves: Vec<ProofNodeIdx>,
+    pub topology: TreeTopology<ProofNodeIdx>,
 }
 
 pub(crate) trait NavigationExt {
@@ -59,7 +60,7 @@ impl<T: Navigation<Interner>> NavigationExt for T {
         use chalk_ir::{TraitRef, WhereClause};
 
         struct Walker<'b> {
-            new_topo: TreeTopology<ProofNodeIdx, ProofNodeIdx>,
+            new_topo: TreeTopology<ProofNodeIdx>,
             tree: &'b dyn Navigation<Interner>,
             ctx: &'b crate::traits::ChalkContext<'b>,
         }
@@ -69,7 +70,7 @@ impl<T: Navigation<Interner>> NavigationExt for T {
                 self.tree
             }
 
-            fn get_new_topology(&mut self) -> &mut TreeTopology<ProofNodeIdx, ProofNodeIdx> {
+            fn get_new_topology(&mut self) -> &mut TreeTopology<ProofNodeIdx> {
                 &mut self.new_topo
             }
 
@@ -127,22 +128,39 @@ pub fn serialize_resolved_tree(
 
     let n = resolved.resolved_goals.len();
 
-    let string_nodes: IndexVec<ProofNodeIdx, String> = IndexVec::from_iter(
-        resolved.resolved_goals.into_iter().sorted_by(|a, b| a.0.cmp(&b.0)).map(|(idx, node)| {
-            match node {
-                Either::Left(goal) => {
+    let error_leaves = resolved
+        .query
+        .trace
+        .nodes
+        .indices()
+        .filter(|idx| {
+            let node = &resolved.query.trace.nodes[*idx];
+            resolved.resolved_goals.contains_key(idx)
+                && node.is_leaf()
+                && matches!(
+                    node.outcome(),
+                    Err(..) | Ok(Solution::Ambig(chalk_solve::Guidance::Unknown))
+                )
+        })
+        .collect::<Vec<_>>();
+
+    let string_nodes: IndexVec<ProofNodeIdx, String> =
+        IndexVec::from_iter(resolved.query.trace.nodes.indices().map(|idx| {
+            match resolved.resolved_goals.get(&idx) {
+                None => "ERROR".to_string(),
+                Some(Either::Left(goal)) => {
                     let mut table = resolved.tables[&idx].clone();
-                    let goal = resolve_completely(&mut table, goal);
+                    let goal = resolve_completely(&mut table, goal.clone());
                     _to_string!(&goal)
                 }
-                Either::Right(fsol) => _to_string!(&fsol),
+                Some(Either::Right(fsol)) => _to_string!(&fsol),
             }
-        }),
-    );
+        }));
 
     SerializedTree {
         descr: resolved.query.trace.descr,
         nodes: string_nodes,
+        error_leaves,
         topology: resolved.query.trace.topology,
     }
 }

@@ -233,7 +233,6 @@ fn export_ra_hir_def() {
 }
 
 #[test]
-#[ignore]
 fn export_ra_hir_ty() {
     ts! { "ra-hir-ty",
 
@@ -241,13 +240,14 @@ fn export_ra_hir_ty() {
       krate::ConstScalar,
       krate::CallableSig,
       krate::CallableSig,
+      krate::SerializedTree,
       Interner,
       InternedWrapper<()>,
       putils::InternIdTS,
       putils::TracedTraitQuery,
       putils::QueryAttempt,
       putils::AttemptKind,
-
+      putils::ObligationSource,
     }
 }
 
@@ -255,6 +255,7 @@ fn export_ra_hir_ty() {
 // Non-ignored exports
 
 #[test]
+#[ignore]
 fn export_proof_tree() {
     ts! { "proof-tree",
 
@@ -299,6 +300,6 @@ fn export_proof_tree() {
       apt::Leaf<Interner>,
       apt::LeafKind<Interner>,
 
-      argus::topology::TreeTopology<idx::ProofNodeIdx, idx::ProofNodeIdx>,
+      argus::topology::TreeTopology<idx::ProofNodeIdx>,
     }
 }
