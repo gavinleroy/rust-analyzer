@@ -898,6 +898,8 @@ impl<'a> InferenceTable<'a> {
 
         let (solution, trace) = self.db.trait_solve_query(krate, block, canonicalized.clone());
 
+        debug!("Query solution {:?}", solution);
+
         let traced = QueryAttempt {
             // context,
             canonicalized: canonicalized.clone(),

@@ -79,19 +79,16 @@ pub struct ObligationTracker<'a> {
 }
 
 impl ObligationTracker<'_> {
-    pub fn into_required_queries(self) -> Vec<TracedTraitQuery> {
+    pub fn into_required_queries(&self) -> impl Iterator<Item = TracedTraitQuery> + '_ {
         let ObligationTracker { tracked, info, .. } = self;
-        tracked
-            .into_iter_enumerated()
-            .map(|(okey, ctx_attempts)| {
-                let attempts = ctx_attempts
-                    .into_iter()
-                    .map(|ctx_attempt| ctx_attempt.value)
-                    .collect::<Vec<_>>();
-                let info = info.get(&okey).unwrap();
-                TracedTraitQuery { info: info.clone(), kind: AttemptKind::Required(attempts) }
-            })
-            .collect::<Vec<_>>()
+        tracked.iter_enumerated().map(move |(okey, ctx_attempts)| {
+            let attempts = ctx_attempts
+                .into_iter()
+                .map(|ctx_attempt| ctx_attempt.value.clone())
+                .collect::<Vec<_>>();
+            let info = info.get(&okey).unwrap();
+            TracedTraitQuery { info: info.clone(), kind: AttemptKind::Required(attempts) }
+        })
     }
 }
 

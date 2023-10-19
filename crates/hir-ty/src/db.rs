@@ -306,7 +306,9 @@ fn trait_solve_wait(
     goal: crate::Canonical<crate::InEnvironment<crate::Goal>>,
 ) -> Option<crate::Solution> {
     let _p = profile::span("trait_solve::wait");
-    db.trait_solve_query(krate, block, goal).0
+    let res = db.trait_solve_query(krate, block, goal).0;
+    tracing::debug!("trait_solve_wait returning {:?}", res);
+    res
 }
 
 #[test]

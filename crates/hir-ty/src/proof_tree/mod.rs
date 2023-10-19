@@ -5,6 +5,7 @@ pub(crate) mod utils;
 pub(crate) mod resolve;
 
 use serde::Serialize;
+use tracing::{info, instrument};
 use ts_rs::TS;
 
 use chalk_ir::cast::Cast;
@@ -105,6 +106,7 @@ impl<T: Navigation<Interner>> NavigationExt for T {
     }
 }
 
+#[instrument(level = "info", skip(db, resolved))]
 pub fn serialize_resolved_tree(
     db: &dyn HirDatabase,
     resolved: ResolvedTrace<'_>,

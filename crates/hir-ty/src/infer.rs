@@ -705,11 +705,13 @@ impl<'a> InferenceContext<'a> {
         }
 
         // Register all single attempts, there are not required obligations.
+        tracing::debug!(
+            "Serializing tree! Tracked lengths {:?} {:?}",
+            table.tracker.tracked.len(),
+            table.tracker.other.len()
+        );
 
-        // FIXME all the 'into' business here is wrong, they can
-        // all be references until writing the resolved strings.
-        let tracked = table.tracker.clone();
-        let required_queries = tracked.into_required_queries();
+        let required_queries = table.tracker.into_required_queries().collect::<Vec<_>>();
         let resolved_queries = required_queries.into_iter().map(|traced_query| {
             use crate::proof_tree::resolve::resolve_bindings;
             resolve_bindings(&mut table, &traced_query)

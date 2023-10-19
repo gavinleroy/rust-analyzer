@@ -170,11 +170,11 @@ fn solve(
 
     // don't set the TLS for Chalk unless Chalk debugging is active, to make
     // extra sure we only use it for debugging
-    if is_chalk_debug() {
-        crate::tls::set_current_program(db, solve)
-    } else {
-        solve()
-    }
+    let res = if is_chalk_debug() { crate::tls::set_current_program(db, solve) } else { solve() };
+
+    tracing::debug!("Returning traced solution {:?}", res);
+
+    res
 }
 
 struct LoggingRustIrDatabaseLoggingOnDrop<'a>(LoggingRustIrDatabase<Interner, ChalkContext<'a>>);

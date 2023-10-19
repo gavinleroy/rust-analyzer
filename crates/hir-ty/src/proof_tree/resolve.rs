@@ -7,6 +7,8 @@ use argus::{
     utils::InferenceTableExt,
 };
 
+use tracing::{debug, instrument};
+
 use chalk_ir::cast::Cast;
 use chalk_ir::fold::TypeFoldable;
 use chalk_ir::Fallible;
@@ -30,6 +32,7 @@ pub struct ResolvedTrace<'a> {
     pub query: QueryAttempt,
 }
 
+#[tracing::instrument(level = "info", skip(table))]
 fn expect_unify<T: ?Sized + Zip<Interner>>(table: &mut InferenceTable<'_>, t1: &T, t2: &T) {
     if table.try_unify(t1, t2).is_err() {
         tracing::warn!(
@@ -42,6 +45,7 @@ Couldn't unify:
     }
 }
 
+#[tracing::instrument(level = "info", skip(table, query))]
 pub(crate) fn resolve_bindings<'a>(
     table: &mut InferenceTable<'a>,
     query: &TracedTraitQuery,
@@ -76,6 +80,8 @@ pub(crate) fn resolve_bindings<'a>(
         trace: &qa.trace,
     };
 
+    tracing::debug!("Visiting at least {:?} nodes", env.trace.nodes.len());
+
     fn resolve_node(env: &mut Env<'_, '_>, node: ProofNodeIdx) {
         let resolved;
 
@@ -83,7 +89,11 @@ pub(crate) fn resolve_bindings<'a>(
             return;
         }
 
-        match &env.trace.nodes[node] {
+        let node_data = &env.trace.nodes[node];
+
+        tracing::debug!("Visiting node {:?} {:?}", node, node_data);
+
+        match node_data {
             // Assumption, the previous goal is the same shape as this one.
             //
             // `FromClauses` is the node that attempts a different clause when proving
@@ -95,8 +105,11 @@ pub(crate) fn resolve_bindings<'a>(
             // Unify new inference variables with those already in the context
             //   (i.e., those from the previous goal).
             ProofTree::FromClauses(value) => {
+                debug!("before canonical");
                 let canonical = value.goal().canonical.clone();
+                debug!("before instantiate");
                 let goal = env.table.instantiate_canonical(canonical).cast(Interner);
+                debug!("before unify");
                 expect_unify(&mut env.table, &env.prev, &goal);
                 resolved = Either::Left(goal.goal.clone());
                 env.prev = goal;
@@ -107,9 +120,13 @@ pub(crate) fn resolve_bindings<'a>(
             // TODO
             ProofTree::Fulfill(value) => match value.goal() {
                 FulfillmentKind::WithClause { goal, clause } => {
+                    debug!("before instantiate");
                     let pci = env.table.instantiate_binders_existentially(Interner, clause.clone());
+                    debug!("before into value");
                     let (pc, binders) = clause.clone().into_value_and_skipped_binders();
                     let value = goal.canonical.value.clone();
+
+                    debug!("before args building");
 
                     let clause_args = binders
                         .iter(Interner)
@@ -128,9 +145,11 @@ pub(crate) fn resolve_bindings<'a>(
                     let clause_subst = env.table.fresh_subst(&the_args);
                     let goal = clause_subst.apply(value.clone(), Interner).cast(Interner);
 
+                    debug!("before unify");
                     // Unify the goal with the previous
                     expect_unify(&mut env.table, &env.prev, &goal);
 
+                    debug!("before unify");
                     // Unify the prev with the consequence of the goal pci @ (consequence :- [conditions ⩘ ...])
                     expect_unify(
                         &mut env.table,

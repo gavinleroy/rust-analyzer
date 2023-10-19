@@ -5,6 +5,8 @@ use std::{
     mem,
 };
 
+use tracing::instrument;
+
 use chalk_ir::{cast::Cast, fold::Shift, DebruijnIndex, Mutability, TyVariableKind};
 use hir_def::{
     generics::TypeOrConstParamData,
@@ -69,6 +71,7 @@ impl InferenceContext<'_> {
 
     /// Infer type of expression with possibly implicit coerce to the expected type.
     /// Return the type after possible coercion.
+    #[instrument(level = "info")]
     pub(super) fn infer_expr_coerce(&mut self, expr: ExprId, expected: &Expectation) -> Ty {
         let ty = self.infer_expr_inner(expr, expected);
         if let Some(target) = expected.only_has_type(&mut self.table) {
@@ -120,6 +123,7 @@ impl InferenceContext<'_> {
         }
     }
 
+    #[instrument(level = "info")]
     fn infer_expr_inner(&mut self, tgt_expr: ExprId, expected: &Expectation) -> Ty {
         self.db.unwind_if_cancelled();
 
@@ -996,6 +1000,7 @@ impl InferenceContext<'_> {
         TyKind::Array(elem_ty, len).intern(Interner)
     }
 
+    #[instrument(level = "info")]
     pub(super) fn infer_return(&mut self, expr: ExprId) {
         let ret_ty = self
             .return_coercion
