@@ -28,11 +28,7 @@ use crate::{
 };
 
 use argus::{
-    proof_tree::{
-        indices::ProofNodeIdx,
-        navigation::{BuildControlFlow, Navigation, TreeView, ViewBuilder},
-        ChildRelKind, TreeDescription,
-    },
+    proof_tree::{indices::ProofNodeIdx, navigation::*, ChildRelKind, TreeDescription},
     topology::TreeTopology,
     utils::SexpExt,
 };
@@ -130,40 +126,59 @@ pub fn serialize_resolved_tree(
 
     let n = resolved.resolved_goals.len();
 
-    let error_leaves = resolved
-        .query
-        .trace
-        .nodes
-        .indices()
-        .filter(|idx| {
-            let node = &resolved.query.trace.nodes[*idx];
-            resolved.resolved_goals.contains_key(idx)
+    // let trace = &orig_trace.without_obligations(Interner);
+    // let trace = &trace.without_fromenv(Interner);
+
+    let orig_trace = &resolved.query.trace;
+    let trace = &orig_trace.only_clauses_head(Interner);
+    let trace = &trace.without_sized_impls(ir);
+    let trace = &trace.without_nonessential_goals(Interner);
+    let trace = &trace.without_redundant_leaves(Interner);
+
+    // let trace = &trace.without_duplicate_clauses(Interner);
+    // let trace = &trace.without_nonessential_goals(Interner);
+    // let trace = &trace.prune_branches(Interner);
+
+    let error_leaves = trace
+        .enumerate_nodes()
+        .filter_map(|(idx, _)| {
+            let node = &resolved.query.trace.nodes[idx];
+            if trace.topology.is_member(idx)
                 && node.is_leaf()
                 && matches!(
                     node.outcome(),
                     Err(..) | Ok(Solution::Ambig(chalk_solve::Guidance::Unknown))
                 )
+            {
+                Some(idx)
+            } else {
+                None
+            }
         })
         .collect::<Vec<_>>();
 
     let string_nodes: IndexVec<ProofNodeIdx, String> =
-        IndexVec::from_iter(resolved.query.trace.nodes.indices().map(|idx| {
+        IndexVec::from_iter(trace.enumerate_nodes().map(|(idx, _)| {
             match resolved.resolved_goals.get(&idx) {
                 None => "ERROR".to_string(),
                 Some(Either::Left(goal)) => {
                     let mut table = resolved.tables[&idx].clone();
                     let goal = resolve_completely(&mut table, goal.clone());
+                    // let goal = table.canonicalize(goal.clone());
                     _to_string!(&goal)
                 }
-                Some(Either::Right(fsol)) => _to_string!(&fsol),
+                Some(Either::Right(fsol)) => {
+                    _to_string!(&fsol)
+                }
+                Some(Either::Right(Err(NoSolution))) => String::from("No"),
             }
         }));
 
     SerializedTree {
-        descr: resolved.query.trace.descr,
+        descr: orig_trace.descr.clone(),
         nodes: string_nodes,
         error_leaves,
-        topology: resolved.query.trace.topology,
+        topology: trace.topology.clone(),
     }
 }
 

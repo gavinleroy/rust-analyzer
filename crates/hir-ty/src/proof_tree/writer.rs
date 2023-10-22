@@ -8,7 +8,7 @@ use hir_def::GenericDefId;
 use rustc_hash::FxHashMap;
 
 use chalk_ir::{debug::*, interner::HasInterner, TSerialize, *};
-use chalk_solve::{RustIrDatabase, Solution};
+use chalk_solve::{Guidance, RustIrDatabase, Solution};
 
 use crate::{
     interner::Interner,
@@ -704,7 +704,10 @@ impl DeepDebug for TyKind<Interner> {
             TyKind::Never => deep!(fmt, ctxt, "Never"),
             TyKind::Array(ty, const_) => deep!(fmt, ctxt, "[", ty, ";", const_, "]"),
             TyKind::Foreign(foreign_ty) => foreign_ty.fmt_deep(fmt, ctxt),
-            TyKind::Error => deep!(fmt, ctxt, "{{error}}"),
+
+            // TODO: this used to be {{error}}, but it should never occur in our
+            // actual, fully resolved output.
+            TyKind::Error => deep!(fmt, ctxt, "???"),
         }
     }
 }
@@ -1207,13 +1210,42 @@ impl DeepDebug for Variances<Interner> {
     }
 }
 
+impl DeepDebug for ConstrainedSubst<Interner> {
+    fn fmt_deep(
+        &self,
+        fmt: &mut Formatter<'_>,
+        ctxt: &mut DebugContext<'_, '_>,
+    ) -> Result<(), Error> {
+        deep!(fmt, ctxt, self.subst)
+    }
+}
+
+impl DeepDebug for Substitution<Interner> {
+    fn fmt_deep(
+        &self,
+        fmt: &mut Formatter<'_>,
+        ctxt: &mut DebugContext<'_, '_>,
+    ) -> Result<(), Error> {
+        self.as_slice(Interner).using_square().fmt_deep(fmt, ctxt)
+    }
+}
+
 impl DeepDebug for Solution<Interner> {
     fn fmt_deep(
         &self,
         fmt: &mut Formatter<'_>,
         ctxt: &mut DebugContext<'_, '_>,
     ) -> Result<(), Error> {
-        todo!()
+        match self {
+            Solution::Unique(canonical_constrained_subst) => {
+                deep!(fmt, ctxt, "Yes: ", canonical_constrained_subst)
+            }
+            Solution::Ambig(Guidance::Definite(canonical_subst))
+            | Solution::Ambig(Guidance::Suggested(canonical_subst)) => {
+                deep!(fmt, ctxt, "Suggested: ", canonical_subst)
+            }
+            Solution::Ambig(Guidance::Unknown) => write!(fmt, "Unknown"),
+        }
     }
 }
 
@@ -1225,7 +1257,7 @@ impl DeepDebug for Fallible<Solution<Interner>> {
     ) -> Result<(), Error> {
         match self {
             Err(e) => write!(fmt, "No"),
-            Ok(sol) => write!(fmt, "{:?}", sol),
+            Ok(sol) => deep!(fmt, ctxt, sol),
         }
     }
 }
